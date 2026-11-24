@@ -7,8 +7,8 @@ a pad to type with, a theme that follows light or dark).
 
 ## Where it comes from
 
-This is the keyboard [droidtop](https://github.com/Droidtop/droidtop) embeds. The owner, 2026-10-14
-(Droidtop/tracker#344): "It's embedded, but some people will want to just use a rebirth of HK". So there is one
+This is the keyboard [droidtop](https://github.com/mytop-project/droidtop) embeds. The owner, 2026-10-14
+(mytop-project/tracker#344): "It's embedded, but some people will want to just use a rebirth of HK". So there is one
 keyboard and two ways to get it:
 
 - **droidtop** builds it into its own app, as its `input-keyboard` module.

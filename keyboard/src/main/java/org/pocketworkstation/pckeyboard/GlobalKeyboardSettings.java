@@ -63,10 +63,10 @@ public final class GlobalKeyboardSettings {
     // Read by PointerTracker
     public int sendSlideKeys = 0;
     //
-    // Read by PointerTracker (droidtop, Droidtop/tracker#340)
+    // Read by PointerTracker (droidtop, mytop-project/tracker#340)
     public boolean spaceDrag = true;
     //
-    // Read by LatinKeyboard (droidtop, Droidtop/tracker#342)
+    // Read by LatinKeyboard (droidtop, mytop-project/tracker#342)
     public KeyboardForm.Form form = KeyboardForm.FULL;
     
     /* Updated by LatinIME */

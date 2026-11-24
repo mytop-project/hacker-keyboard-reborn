@@ -11,7 +11,7 @@ import android.view.View
 import android.widget.FrameLayout
 
 /**
- * Where droidtop's keyboard types (docs/SPEC.md 4c, "Typing on the add-on display", Droidtop/tracker#314).
+ * Where droidtop's keyboard types (docs/SPEC.md 4c, "Typing on the add-on display", mytop-project/tracker#314).
  * Keys arrive on the hardware model [SecondScreenKeyboardListener] speaks: Android keycodes, pressed and
  * released, Shift as its own key around a capital. [text] carries what no key produces (an emoji from a
  * popup); a destination without a text channel (a compositor) sets [takesText] false.
@@ -41,7 +41,7 @@ interface KeyboardSink {
  *
  * [suppressImeView] is for surfaces that type into the input method's editor: while one is on screen, the input
  * method does not also put its own view up ([SecondScreenKeyboard.setAttached]). It follows window visibility,
- * not attachment, because a stopped Activity's views stay attached (Droidtop/tracker#156).
+ * not attachment, because a stopped Activity's views stay attached (mytop-project/tracker#156).
  *
  * [context] must belong to the display the panel is drawn on: the key grid sizes itself from its metrics.
  */

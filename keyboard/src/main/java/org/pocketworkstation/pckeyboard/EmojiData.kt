@@ -11,7 +11,7 @@ data class EmojiGroup(val id: String, val entries: List<EmojiEntry>)
 
 /**
  * The emoji the keyboard offers, with the names and keywords search reads (docs/SPEC.md 6a, "Emoji panel and
- * search", Droidtop/tracker#342). The data is `assets/emoji/en.txt`, FlorisBoard's generated CLDR v48 list
+ * search", mytop-project/tracker#342). The data is `assets/emoji/en.txt`, FlorisBoard's generated CLDR v48 list
  * (Apache-2.0 app, Unicode data; see `assets/emoji/SOURCE.txt`), parsed here as it is: `[group]` headers, then
  * `emoji;name;keyword|keyword` lines. A line starting with a tab is a skin-tone variant of the line above and is
  * left out of the grid and of search. No Android classes, so it is tested on the JVM.
@@ -71,7 +71,7 @@ class EmojiCatalog(val groups: List<EmojiGroup>) {
     }
 }
 
-/** The most recently used emoji, newest first (Droidtop/tracker#342). One per line when saved. */
+/** The most recently used emoji, newest first (mytop-project/tracker#342). One per line when saved. */
 object EmojiRecents {
     const val MAX = 30
 

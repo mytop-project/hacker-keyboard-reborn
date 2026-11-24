@@ -1,6 +1,6 @@
 # Builds the app and runs the keyboard's unit tests. Nothing here signs or
 # publishes: a release build and its signing are added when the app is
-# released (Droidtop/tracker#344). Actions are pinned to the same commits
+# released (mytop-project/tracker#344). Actions are pinned to the same commits
 # droidtop's own workflows pin.
 name: Build
 

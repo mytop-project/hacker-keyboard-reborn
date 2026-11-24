@@ -9,7 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
 /**
- * The process's clipboard history (docs/SPEC.md 6a, "Editing helpers", Droidtop/tracker#340): the model
+ * The process's clipboard history (docs/SPEC.md 6a, "Editing helpers", mytop-project/tracker#340): the model
  * ([ClipboardHistory]) kept in memory, recorded from the primary clip as it changes (no polling), saved to a file in
  * the app's private storage. All file work runs on one background thread; the main thread only touches memory.
  *

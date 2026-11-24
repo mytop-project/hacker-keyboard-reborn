@@ -3,7 +3,7 @@ package org.pocketworkstation.pckeyboard
 import kotlin.math.roundToInt
 
 /**
- * The shape of the key grid on the screen (docs/SPEC.md 6a, "One-handed and split", Droidtop/tracker#342): the
+ * The shape of the key grid on the screen (docs/SPEC.md 6a, "One-handed and split", mytop-project/tracker#342): the
  * full width, a narrower grid at the left or right edge for one hand, or the grid split with a gap in the middle
  * so each thumb has a half (a handheld held in landscape). The key layouts themselves are untouched: the same
  * keys are scaled and moved once they are loaded ([layout], called from `Keyboard.applyForm`). No Android classes.

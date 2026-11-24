@@ -17,7 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * The keyboard with its editing helpers (docs/SPEC.md 6a, "Editing helpers", Droidtop/tracker#340): a strip of tool
+ * The keyboard with its editing helpers (docs/SPEC.md 6a, "Editing helpers", mytop-project/tracker#340): a strip of tool
  * buttons above the key grid, and panels (clipboard history, macros) that take the grid's place while open. The one
  * wrapper both surfaces use: droidtop's input method wraps its input view in it ([wrap], from
  * `KeyboardSwitcher`), and [KeyboardPanel] (the companion, the overlays, droidtop's own fields) wraps its grid. What a

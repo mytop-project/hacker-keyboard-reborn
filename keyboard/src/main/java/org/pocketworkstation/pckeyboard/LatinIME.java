@@ -981,7 +981,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /**
-     * droidtop patch (Droidtop/tracker#340): the input view with the tool strip above the keys (clipboard history,
+     * droidtop patch (mytop-project/tracker#340): the input view with the tool strip above the keys (clipboard history,
      * macros, incognito), or the keys alone when the strip is switched off.
      */
     View wrapInputView(LatinKeyboardView keyboard) {
@@ -1001,7 +1001,7 @@ public class LatinIME extends InputMethodService implements
     /** The tool strip around the current input view, if there is one; shows the autofill suggestions. */
     private ToolsDeck mToolsDeck;
 
-    /** droidtop patch (Droidtop/tracker#342): autofill suggestions in the keyboard, Android 11 and later. */
+    /** droidtop patch (mytop-project/tracker#342): autofill suggestions in the keyboard, Android 11 and later. */
     @Override
     @RequiresApi(Build.VERSION_CODES.R)
     public android.view.inputmethod.InlineSuggestionsRequest onCreateInlineSuggestionsRequest(Bundle uiExtras) {
@@ -1021,7 +1021,7 @@ public class LatinIME extends InputMethodService implements
         return true;
     }
 
-    /** droidtop patch (Droidtop/tracker#340): a space-bar drag moves the cursor like the arrow keys do. */
+    /** droidtop patch (mytop-project/tracker#340): a space-bar drag moves the cursor like the arrow keys do. */
     @Override
     public void onCursorDrag(int steps) {
         final int key = steps < 0 ? LatinKeyboardView.KEYCODE_DPAD_LEFT : LatinKeyboardView.KEYCODE_DPAD_RIGHT;
@@ -2032,7 +2032,7 @@ public class LatinIME extends InputMethodService implements
     // Implementation of KeyboardViewListener
 
     public void onKey(int primaryCode, int[] keyCodes, int x, int y) {
-        // droidtop patch (Droidtop/tracker#342): an open emoji search takes the keys.
+        // droidtop patch (mytop-project/tracker#342): an open emoji search takes the keys.
         if (KeyboardCapture.offerKey(primaryCode)) {
             return;
         }
@@ -2912,7 +2912,7 @@ public class LatinIME extends InputMethodService implements
             int frequencyDelta, boolean addToBigramDictionary) {
         if (suggestion == null || suggestion.length() < 1)
             return;
-        // droidtop patch (Droidtop/tracker#340): incognito mode, a password field and an editor that asked for no
+        // droidtop patch (mytop-project/tracker#340): incognito mode, a password field and an editor that asked for no
         // personalised learning learn nothing.
         if (!IncognitoRules.learningAllowed(ToolsPrefs.INSTANCE.incognito(this),
                 sKeyboardSettings.editorImeOptions, mPasswordText)) {

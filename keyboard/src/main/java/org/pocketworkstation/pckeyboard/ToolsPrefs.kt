@@ -7,7 +7,7 @@ import android.preference.PreferenceManager
 import android.view.inputmethod.EditorInfo
 
 /**
- * The settings of the keyboard's editing helpers (docs/SPEC.md 6a, "Editing helpers", Droidtop/tracker#340). They
+ * The settings of the keyboard's editing helpers (docs/SPEC.md 6a, "Editing helpers", mytop-project/tracker#340). They
  * live in the same default preference store as every other Hacker's Keyboard setting, so the settings screen, the
  * input method and the panels droidtop draws all read one value.
  */
@@ -58,7 +58,7 @@ object ToolsPrefs {
     fun macros(context: Context): List<Macro> = MacroParser.parse(macroSource(context))
 }
 
-/** When the keyboard asks for autofill suggestions (Droidtop/tracker#342): Android 11 or later, and not switched off. */
+/** When the keyboard asks for autofill suggestions (mytop-project/tracker#342): Android 11 or later, and not switched off. */
 object InlineRules {
     const val MIN_SDK = 30
 
@@ -66,7 +66,7 @@ object InlineRules {
     fun wanted(sdk: Int, preference: Boolean): Boolean = sdk >= MIN_SDK && preference
 }
 
-/** When the keyboard may learn from what is typed (Droidtop/tracker#340). */
+/** When the keyboard may learn from what is typed (mytop-project/tracker#340). */
 object IncognitoRules {
     /**
      * Learning is off in incognito mode, in a password field and where the editor asked for no personalised

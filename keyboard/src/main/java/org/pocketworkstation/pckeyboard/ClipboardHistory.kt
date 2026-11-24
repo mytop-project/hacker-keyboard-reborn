@@ -1,7 +1,7 @@
 package org.pocketworkstation.pckeyboard
 
 /**
- * The keyboard's clipboard history as a plain model (docs/SPEC.md 6a, "Editing helpers", Droidtop/tracker#340):
+ * The keyboard's clipboard history as a plain model (docs/SPEC.md 6a, "Editing helpers", mytop-project/tracker#340):
  * bounded, newest first, with pinned entries kept and listed first. Text only; a clip longer than [maxChars] is
  * dropped rather than truncated (the clipboard bridge does the same, SPEC 6d), a blank clip or one the source
  * flagged sensitive is never recorded, and nothing is recorded while incognito. No Android classes, so it is

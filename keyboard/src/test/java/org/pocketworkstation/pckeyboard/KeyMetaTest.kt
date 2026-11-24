@@ -4,7 +4,7 @@ import android.view.KeyEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The meta state every keyboard sink derives from droidtop's hardware-style key stream (Droidtop/tracker#314). */
+/** The meta state every keyboard sink derives from droidtop's hardware-style key stream (mytop-project/tracker#314). */
 class KeyMetaTest {
     @Test
     fun `modifiers set and clear their own bit and other keys leave the state alone`() {

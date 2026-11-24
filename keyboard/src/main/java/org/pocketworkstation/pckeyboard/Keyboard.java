@@ -906,7 +906,7 @@ public class Keyboard {
     }
 
     /**
-     * droidtop patch (Droidtop/tracker#342): scales and splits the loaded keys for the one-handed and split forms
+     * droidtop patch (mytop-project/tracker#342): scales and splits the loaded keys for the one-handed and split forms
      * ({@link KeyboardForm}). Called once, right after the layout is loaded and before anything reads positions.
      */
     void applyForm(KeyboardForm.Form form) {

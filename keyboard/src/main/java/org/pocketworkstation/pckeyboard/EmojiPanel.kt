@@ -16,7 +16,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * The emoji panel (docs/SPEC.md 6a, "Emoji panel and search", Droidtop/tracker#342): a row of group buttons (Recent
+ * The emoji panel (docs/SPEC.md 6a, "Emoji panel and search", mytop-project/tracker#342): a row of group buttons (Recent
  * first), a grid of the group's emoji, and Search and Back. Takes the key grid's place like the other tool panels.
  * Emoji are listed from [EmojiAssets] once loaded; a tap calls [onPick].
  */
@@ -153,7 +153,7 @@ internal class EmojiBrowser(
 }
 
 /**
- * The emoji search (Droidtop/tracker#342): a line showing the query typed on the keyboard itself and a row of
+ * The emoji search (mytop-project/tracker#342): a line showing the query typed on the keyboard itself and a row of
  * matches. While it is open it takes the keyboard's keys ([KeyboardCapture]); a match is picked with a tap, Enter or
  * Done closes it. Sits between the tool strip and the key grid, so the grid stays usable.
  */

@@ -2,7 +2,7 @@
 # Copies droidtop's keyboard module into keyboard/, the only way keyboard/ changes.
 #
 # Hacker Keyboard Reborn is the standalone app of the keyboard droidtop embeds
-# (Droidtop/tracker#344). The keyboard's one source is droidtop's
+# (mytop-project/tracker#344). The keyboard's one source is droidtop's
 # input-keyboard/ module; keyboard/ here is a copy of it at one droidtop commit,
 # recorded in keyboard/UPSTREAM, and is never edited in this repository. A fix
 # goes to droidtop first, then this script brings it here.

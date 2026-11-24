@@ -293,7 +293,7 @@ class SecondScreenKeyboardListener(
     /** Fn / layout-switch, which change what THIS keyboard shows and go nowhere else. */
     private val onLayoutToggle: () -> Unit = {},
     /**
-     * Space-bar drag moves the cursor (Droidtop/tracker#340). A hardware key is typed the moment it goes down, so
+     * Space-bar drag moves the cursor (mytop-project/tracker#340). A hardware key is typed the moment it goes down, so
      * with this on the space bar goes down and up together when it is let go, unless the touch became a drag.
      */
     private val deferSpace: Boolean = false,
