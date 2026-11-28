@@ -37,11 +37,8 @@
     <string name="title_debugging">Debugging</string>
     <string name="title_input_connection_details">Input connection details</string>
     <string name="title_version">Version</string>
-    <string name="title_swipe_gestures">Swipe gestures (experimental)</string>
+    <string name="title_swipe_gestures">Swipe gestures, experimental</string>
     <string name="title_hardware_key_actions">Hardware key actions</string>
-
-    <!-- Option to provide vibrate/haptic feedback on keypress -->
-    <string name="vibrate_on_keypress">Vibrate on keypress</string>
 
     <!-- Option to play back sound on keypress in soft keyboard -->
     <string name="sound_on_keypress">Sound on keypress</string>
@@ -156,7 +153,7 @@
     <string name="added_word"><xliff:g id="word">%s</xliff:g> : Saved</string>
     
     <!-- Tip to long press on keys -->
-    <string name="tip_long_press">Hold a key down to see accents (ø, ö, etc.)</string>
+    <string name="tip_long_press">Hold a key down to see its accents, such as ø and ö</string>
     <!-- Tip to dismiss keyboard -->
     <string name="tip_dismiss">Press the back key \u21B6 to close the keyboard at any point</string>
     <!-- Tip to press ?123 to access numbers and symbols -->
@@ -325,6 +322,11 @@
     <!-- Add to dictionary hint -->
     <string name="hint_add_to_dictionary">\u2190 Touch again to save</string>
     
+    <!-- droidtop (mytop-project/tracker#903 H7a): the suggestion strip while a language's own typing loads its data. -->
+    <string name="engine_getting_ready">%1$s is getting ready\u2026</string>
+    <!-- droidtop (mytop-project/tracker#903 H7c): the same line while the language's dictionary downloads, with how far it has come. -->
+    <string name="engine_getting_ready_percent">%1$s is getting ready\u2026 %2$d%%</string>
+
     <!-- Inform the user that a particular language has an available dictionary -->
     <string name="has_dictionary">Dictionary available</string>
 
@@ -346,24 +348,52 @@
     <!-- Description for keyboard theme switcher -->
     <string name="keyboard_layout">Keyboard Theme</string>
     <string name="layout_basic" translatable="false">Basic</string>
-    <string name="layout_high_contrast" translatable="false">Basic (High Contrast)</string>
-    <string name="layout_stone_bold"  translatable="false">Stone (bold)</string>
-    <string name="layout_stone_normal"  translatable="false">Stone (normal)</string>
+    <string name="layout_high_contrast" translatable="false">Basic high contrast</string>
+    <string name="layout_stone_bold"  translatable="false">Stone bold</string>
+    <string name="layout_stone_normal"  translatable="false">Stone</string>
     <string name="layout_gingerbread"  translatable="false">Gingerbread</string>
-    <string name="layout_ics"  translatable="false">Ice Cream Sandwich (bright hints)</string>
-    <string name="layout_ics_darker"  translatable="false">Ice Cream Sandwich (dark hints)</string>
+    <string name="layout_ics"  translatable="false">Ice Cream Sandwich, bright hints</string>
+    <string name="layout_ics_darker"  translatable="false">Ice Cream Sandwich, dark hints</string>
     <string name="layout_trans"  translatable="false">Transparent</string>
-    <string name="layout_trans_neon"  translatable="false">Transparent (experimental)</string>
+    <string name="layout_trans_neon"  translatable="false">Transparent, experimental</string>
 	<string name="layout_material_black" translatable="false">Material Black</string>
     <string name="layout_material_dark" translatable="false">Material Dark</string>
     <string name="layout_material_light" translatable="false">Material Light</string>
+    <!-- droidtop: Hacker Keyboard Reborn's modern themes (mytop-project/tracker#903 H12b). Modern is the old "Follow light or dark", id 8. -->
+    <string name="layout_modern">Modern</string>
+    <string name="layout_dynamic">Dynamic, from the wallpaper</string>
+    <string name="layout_modern_high_contrast">High contrast</string>
+    <string name="layout_match_host">Match droidtop</string>
 
+    <!-- droidtop: "Light and dark" for the modern themes (mytop-project/tracker#903 H12b). -->
+    <string name="title_light_dark">Light and dark</string>
+    <string name="light_dark_follow_system">Follow the system</string>
+    <string name="light_dark_follow_host">Follow droidtop\'s Light or dark</string>
+    <string name="light_dark_always_light">Always light</string>
+    <string name="light_dark_always_dark">Always dark</string>
+    <string name="light_dark_fixed">This theme keeps its own look</string>
+    <string-array name="light_dark_entries">
+        <item>@string/light_dark_follow_system</item>
+        <item>@string/light_dark_always_light</item>
+        <item>@string/light_dark_always_dark</item>
+    </string-array>
+    <string-array name="light_dark_values" translatable="false">
+        <item>system</item>
+        <item>light</item>
+        <item>dark</item>
+    </string-array>
+
+    <!--
+    The theme setting builds its own list (ThemePreference, ThemePresets); this one is the debug screen's.
+    Its labels follow the layout each id draws: 5 is Material Light and 7 Material Black (KeyboardSwitcher.THEMES).
+    -->
     <string-array name="keyboard_layout_modes" translatable="false">
+        <item>@string/layout_modern</item>
         <item>@string/layout_ics</item>
         <item>@string/layout_ics_darker</item>
-		<item>@string/layout_material_black</item>
-        <item>@string/layout_material_dark</item>
         <item>@string/layout_material_light</item>
+        <item>@string/layout_material_dark</item>
+        <item>@string/layout_material_black</item>
         <item>@string/layout_gingerbread</item>
         <item>@string/layout_stone_bold</item>
         <item>@string/layout_trans_neon</item>
@@ -376,6 +406,7 @@
     above.
     -->
     <string-array name="keyboard_layout_modes_values" translatable="false">
+        <item>8</item>
         <item>0</item>
         <item>6</item>
         <item>5</item>
@@ -393,7 +424,7 @@
     <string name="title_keyboard_mode_landscape">Keyboard mode, landscape</string>
     <string-array name="keyboard_mode_entries">
         <item>4-row Gingerbread layout</item>
-        <item>5-row compact layout (US QWERTY only!)</item>
+        <item>5-row compact layout, US QWERTY only</item>
         <item>Full 5-row layout</item>
     </string-array>
     <string-array name="keyboard_mode_values">
@@ -402,13 +433,13 @@
         <item>2</item>
     </string-array>
 
-    <string name="title_ctrl_a_override">Ctrl-A (select all) override</string>
+    <string name="title_ctrl_a_override">Ctrl-A override</string>
     <string name="toast_ctrl_a_override_info">Ctrl-A is disabled. Use Ctrl-Alt-A instead, or enable it in settings.</string>
     <string name="default_ctrl_a_override">0</string>
     <string-array name="ctrl_a_override_entries">
         <item>Disable Ctrl-A, use Ctrl-Alt-A instead</item>
         <item>Disable Ctrl-A completely</item>
-        <item>Use Ctrl-A (no override)</item>
+        <item>Use Ctrl-A</item>
     </string-array>
     <string-array name="ctrl_a_override_values">
         <item>0</item>
@@ -419,7 +450,7 @@
     <string name="title_chording_ctrl_key">Ctrl key code</string>
     <string name="default_chording_ctrl_key">0</string>
     <string-array name="chording_ctrl_key_entries">
-        <item>None (ignored when not modifying other keys)</item>
+        <item>None</item>
         <item>Left Ctrl</item>
         <item>Right Ctrl</item>
     </string-array>
@@ -432,7 +463,7 @@
     <string name="title_chording_alt_key">Alt key code</string>
     <string name="default_chording_alt_key">0</string>
     <string-array name="chording_alt_key_entries">
-        <item>None (ignored when not modifying other keys)</item>
+        <item>None</item>
         <item>Left Alt</item>
         <item>Right Alt</item>
     </string-array>
@@ -445,7 +476,7 @@
     <string name="title_chording_meta_key">Meta key code</string>
     <string name="default_chording_meta_key">0</string>
     <string-array name="chording_meta_key_entries">
-        <item>None (ignored when not modifying other keys)</item>
+        <item>None</item>
         <item>Left Meta</item>
         <item>Right Meta</item>
     </string-array>
@@ -478,8 +509,8 @@
     <string name="summary_connectbot_tab_hack_false">Send plain Tab key event</string>
 
     <string name="title_caps_lock">Double-tap Shift mode</string>
-    <string name="summary_caps_lock_true">Caps Lock (q1 => Q1)</string>
-    <string name="summary_caps_lock_false">Shift Lock (q1 => Q!)</string>
+    <string name="summary_caps_lock_true">Caps Lock: q1 => Q1</string>
+    <string name="summary_caps_lock_false">Shift Lock: q1 => Q!</string>
 
     <string name="title_shift_lock_modifiers">Apply Shift Lock to modifier keys?</string>
     <string name="summary_shift_lock_modifiers_true">Yes, including arrow keys</string>
@@ -506,7 +537,7 @@
     <string name="title_slide_keys">Sliding key events</string>
     <!-- Values are a bitmap, see use in PointerTracker -->
     <string-array name="slide_keys_entries">
-        <item>Ignore keys during sliding movement (Recommended)</item>
+        <item>Ignore keys during sliding movement</item>
         <item>Send first key touched</item>
         <item>Send last key touched</item>
         <item>Send first and last key</item>
@@ -529,12 +560,31 @@
 
     <string name="title_vibrate_len">Vibrate duration</string>
 
+    <!-- droidtop patch (mytop-project/tracker#903 H12a): in place of Vibrate on keypress. Light, Medium and Strong give each
+         key class (letter, modifier, delete, space and enter) its own haptic; Custom buzzes every key for the Vibrate
+         duration, as Hacker's Keyboard did. -->
+    <string name="title_vibrate_strength">Vibration strength</string>
+    <string-array name="vibrate_strength_entries">
+        <item>Off</item>
+        <item>Light</item>
+        <item>Medium</item>
+        <item>Strong</item>
+        <item>Custom vibrate duration</item>
+    </string-array>
+    <string-array name="vibrate_strength_values" translatable="false">
+        <item>off</item>
+        <item>light</item>
+        <item>medium</item>
+        <item>strong</item>
+        <item>custom</item>
+    </string-array>
+
     <string name="title_click_volume">Key click volume</string>
     <string name="default_click_volume">0.2</string>
     <string name="title_click_method">Click volume control method</string>
     <string name="default_click_method">0</string>
     <string-array name="click_method_entries">
-        <item>System default (ignore click volume)</item>
+        <item>System default, ignores click volume</item>
         <item>Absolute click volume</item>
         <item>Follow media volume</item>
         <item>Reverse media volume</item>
@@ -549,11 +599,11 @@
     <string name="title_long_press_duration">Long-press duration</string>
 
     <string name="title_render_mode">Drawing method</string>
-    <string name="render_mode_unavailable">(not changeable on this device)</string>
+    <string name="render_mode_unavailable">Not changeable on this device</string>
     <string-array name="render_mode_entries">
-        <item>Direct draw (saves memory)</item>
-        <item>Software buffered (default)</item>
-        <item>Hardware accelerated (experimental)</item>
+        <item>Direct draw, saves memory</item>
+        <item>Software buffered</item>
+        <item>Hardware accelerated, experimental</item>
     </string-array>
     <!-- Keep these values in sync with android.view.View LAYER_TYPE_* definitions -->
     <string-array name="render_mode_values">
@@ -571,7 +621,7 @@
     <string name="title_vol_up">Volume up</string>
     <string name="title_vol_down">Volume down</string>
         <string-array name="swipe_action_entries">
-        <item>(no action)</item>
+        <item>No action</item>
         <item>Close keyboard</item>
         <item>Toggle extension row</item>
         <item>Launch Settings</item>
@@ -662,9 +712,9 @@
           <p>&#8226; When typing, slide the space bar horizontally to switch between selected layouts.
         </blockquote>
 
-        <h3>Optional: Install completion dictionary packages:</h3>
+        <h3>Optional: Add completion dictionaries:</h3>
         <blockquote>
-          <p>&#8226; Press the <b>More</b> button above to do a Play Store search for the keyboard's developer name, this will show free downloadable completion dictionary packages.</p>
+          <p>&#8226; Press the <b>Dictionaries</b> button above to manage dictionaries or import a word list from a file.</p>
         </blockquote>
         
         <h2>Additional information</h2>
@@ -676,16 +726,56 @@
     <string name="seek_pref_val">x%</string>
     <string name="seek_pref_max">100%</string>
     <string name="title_editing_helpers">Editing helpers</string>
+    <string name="title_dictionaries">Dictionaries</string>
+    <!-- The pad-driven keyboard slab's named keys (mytop-project/tracker#485, #772). -->
+    <string name="slab_description">Keyboard</string>
+    <string name="slab_backspace">Backspace</string>
+    <string name="slab_space">Space</string>
+    <string name="slab_shift">Shift</string>
+    <string name="slab_caps">Caps</string>
+    <string name="slab_clipboard">Clipboard</string>
+    <string name="slab_system_keyboard">System keyboard</string>
+    <string name="slab_search">Search</string>
+    <string name="slab_save">Save</string>
+    <string name="slab_enter">Enter</string>
+    <string name="summary_dictionaries">Words for suggestions and corrections, one per language, added from a .combined or .gz wordlist file</string>
+    <string name="dictionary_add_from_file">Add from a file…</string>
+    <string name="dictionary_converting">Converting the wordlist. This takes a moment</string>
+    <string name="dictionary_remove">Remove %1$s</string>
+    <string name="dictionary_remove_damaged">Remove %1$s. It\'s damaged, so not in use</string>
+    <string name="dictionary_removed">Removed the %1$s dictionary</string>
+    <string name="dictionary_not_removed">Couldn\'t remove the %1$s dictionary</string>
+    <string name="dictionary_added">Added %1$s: %2$d words, used from the next text field</string>
+    <string name="title_droidtop_mode">Settings shown</string>
+    <string name="title_pro_mode">Pro mode</string>
+    <string name="summary_pro_mode_on">Every Hacker\'s Keyboard option is shown</string>
+    <string name="summary_pro_mode_off">The common options only. Turn on for every Hacker\'s Keyboard option. Hidden options keep their values</string>
+    <string name="title_keyboard_preset">Start from a preset</string>
+    <string name="summary_keyboard_preset">Handheld, Terminal or Classic Hacker: sets a few options at once. Each stays changeable</string>
+    <string name="title_reset_modern">Reset to modern defaults</string>
+    <string name="summary_reset_modern">Puts every option back to its default. Your macros and languages stay</string>
+    <string name="confirm_reset_modern">Reset every keyboard option to its default? Your macros and languages stay.</string>
+    <string name="action_reset">Reset</string>
     <string name="title_tools_strip">Tool strip</string>
     <string name="summary_tools_strip">A row of buttons above the keys: clipboard history, macros and incognito mode.</string>
-    <string name="title_keyboard_form">Key grid shape</string>
+    <string name="title_keyboard_form">Key grid shape, portrait</string>
+    <string name="title_keyboard_form_landscape">Key grid shape, landscape</string>
     <string-array name="keyboard_form_entries">
+        <item>Automatic, full width</item>
         <item>Full width</item>
-        <item>Split (a gap in the middle, for two thumbs)</item>
+        <item>Split, with a gap in the middle for two thumbs</item>
+        <item>One-handed, left</item>
+        <item>One-handed, right</item>
+    </string-array>
+    <string-array name="keyboard_form_landscape_entries">
+        <item>Automatic: split on a handheld, else full width</item>
+        <item>Full width</item>
+        <item>Split, with a gap in the middle for two thumbs</item>
         <item>One-handed, left</item>
         <item>One-handed, right</item>
     </string-array>
     <string-array name="keyboard_form_values" translatable="false">
+        <item>auto</item>
         <item>full</item>
         <item>split</item>
         <item>left</item>
@@ -694,16 +784,182 @@
     <string name="title_emoji">Emoji panel</string>
     <string name="summary_emoji">An Emoji button on the tool strip: emoji by group, recently used, and search by name typed on the keyboard.</string>
     <string name="title_inline_autofill">Autofill suggestions</string>
-    <string name="summary_inline_autofill">Show suggestions from a password manager or autofill service in a row above the keys (Android 11 and later).</string>
+    <string name="summary_inline_autofill">Show suggestions from a password manager or autofill service in a row above the keys. Android 11 and later.</string>
     <string name="title_incognito">Incognito mode</string>
     <string name="summary_incognito">Learn no words and record no clipboard history while on. Password fields and editors that ask for no personalised learning are always treated this way.</string>
     <string name="title_clipboard_history">Clipboard history</string>
-    <string name="summary_clipboard_history">Keep the text you copy so it can be pinned and pasted again. Clips marked sensitive are never kept.</string>
+    <string name="summary_clipboard_history">Keep the text you copy so it can be pinned and pasted again. Clips marked sensitive, and copies from password fields, are never kept.</string>
+    <!-- "Keep clips for" (mytop-project/tracker#903 H12d): pinned clips stay whatever it says. -->
+    <string name="title_clipboard_keep">Keep clips for</string>
+    <string-array name="clipboard_keep_entries">
+        <item>1 hour</item>
+        <item>1 day</item>
+        <item>1 week</item>
+        <item>Until cleared</item>
+    </string-array>
+    <string-array name="clipboard_keep_values" translatable="false">
+        <item>hour</item>
+        <item>day</item>
+        <item>week</item>
+        <item>forever</item>
+    </string-array>
     <string name="title_space_drag">Space bar moves the cursor</string>
-    <string name="summary_space_drag">Drag a finger along the space bar to move the cursor; with Shift held on the keyboard it selects.</string>
+    <string name="summary_space_drag">Drag a finger along the space bar to move the cursor. With Shift held on the keyboard it selects.</string>
+    <string name="title_glide">Glide typing</string>
+    <string name="summary_glide">Draw a word across the letters without lifting your finger. Needs a dictionary for the language, under Dictionaries.</string>
     <string name="title_macros">Macros</string>
     <string name="message_macros">One per line, name = steps. Steps: C-b (Ctrl+B), A-x, S-Tab, M-x, key names (Esc, Enter, Tab, Up, F5, ...), letters, and \"quoted text\" with \\n for Enter. Example: tmux new window = C-b c</string>
     <string name="notification_channel_name">Hacker\'s Keyboard</string>
     <string name="notification_channel_description">Hacker\'s Keyboard</string>
     <string name="notification_action_settings">Settings</string>
+    <!-- droidtop: offline voice typing, downloaded on request (mytop-project/tracker#343). -->
+    <string name="title_offline_voice">Offline voice typing</string>
+    <string name="summary_offline_voice">Dictation on this device, with nothing sent anywhere. Downloads the speech engine and an English model first</string>
+    <string name="offline_voice_on">On: the voice key types what you say, offline. Takes %1$d MB on this device</string>
+    <string name="offline_voice_download">Download</string>
+    <string name="offline_voice_download_body">Downloads about %1$d MB from the sherpa-onnx project on GitHub and keeps %2$d MB on this device. Each file is checked before it is used. The voice key then types what you say, without a connection. Android asks once for the microphone.</string>
+    <string name="offline_voice_starting">Starting the download</string>
+    <string name="offline_voice_remove">Remove</string>
+    <string name="offline_voice_remove_body">Removes the speech engine and model, %1$d MB. The voice key goes back to another keyboard\'s voice typing, if one is on.</string>
+    <string name="offline_voice_removing">Removing</string>
+    <string name="offline_voice_listening">Listening… tap here or the voice key to stop</string>
+    <string name="offline_voice_failed">Offline voice typing stopped: %1$s</string>
+    <string name="offline_voice_failed_download">The download failed: %1$s</string>
+    <string name="offline_voice_failed_abi">This device has no 64-bit ABI the engine is built for</string>
+    <string name="offline_voice_failed_server">The server answered %1$d for %2$s</string>
+    <string name="offline_voice_failed_checksum">The download did not match its checksum, so it was not kept</string>
+    <string name="offline_voice_failed_files">Couldn\'t use the download: it held %1$d of the %2$d files expected</string>
+    <string name="offline_voice_failed_not_placed">Couldn\'t put the download in place</string>
+    <string name="offline_voice_downloading_engine">Downloading the engine: %1$d of %2$d MB</string>
+    <string name="offline_voice_downloading_model">Downloading the English model: %1$d of %2$d MB</string>
+    <!-- The tool strip and its panels (mytop-project/tracker#340, #772). -->
+    <string name="tool_switch_keyboard">Switch keyboard</string>
+    <string name="tool_clipboard">Clipboard</string>
+    <string name="tool_emoji">Emoji</string>
+    <string name="tool_layout">Layout: %1$s</string>
+    <!-- The input method's modes (mytop-project/tracker#903 H12c). -->
+    <string name="tool_mode">Mode: %1$s</string>
+    <string name="title_modes">Modes</string>
+    <string name="modes_status">For this orientation. Normal gives back the keyboard as it was.</string>
+    <string name="mode_normal">Normal</string>
+    <string name="mode_split">Split</string>
+    <string name="mode_one_handed_left">One-handed left</string>
+    <string name="mode_one_handed_right">One-handed right</string>
+    <string name="mode_floating">Floating</string>
+    <string name="mode_thumb_split">Thumb split</string>
+    <string name="mode_number_pad">Number pad</string>
+    <string name="mode_switch_side">Move the keys to the other side</string>
+    <string name="mode_switch_side_glyph" translatable="false">⇄</string>
+    <string name="mode_back_to_full">Back to the full keyboard</string>
+    <string name="mode_full_glyph" translatable="false">▭</string>
+    <string name="mode_resize">Drag sideways to make the keys wider or narrower</string>
+    <string name="mode_resize_glyph" translatable="false">↔</string>
+    <string name="mode_resize_percent">%1$d%%</string>
+    <string name="mode_float_move">Drag to move the keyboard</string>
+    <string name="mode_float_grip" translatable="false">≡</string>
+    <string name="mode_float_dock">Dock</string>
+    <string name="mode_float_corner" translatable="false">⇲</string>
+    <string name="mode_float_resize">Drag to resize the keyboard</string>
+    <string name="title_keyboard_view_mode">Keyboard mode, portrait</string>
+    <string name="title_keyboard_view_mode_landscape">Keyboard mode, landscape</string>
+    <string-array name="keyboard_view_mode_entries">
+        <item>Normal, the key grid shape above</item>
+        <item>Floating</item>
+        <item>Thumb split on screens over 7.5 inches, split elsewhere</item>
+        <item>Number pad</item>
+    </string-array>
+    <string-array name="keyboard_view_mode_values" translatable="false">
+        <item>normal</item>
+        <item>floating</item>
+        <item>thumb</item>
+        <item>numpad</item>
+    </string-array>
+    <string name="tool_copied_for_terminal">Copied. Paste it in the terminal.</string>
+    <string name="tool_incognito">Incognito</string>
+    <string name="tool_incognito_on">Incognito: on</string>
+    <string name="tool_incognito_recording_nothing">Incognito: nothing new is recorded.</string>
+    <string name="tool_back">Back</string>
+    <string name="tool_clipboard_empty">Nothing copied yet.</string>
+    <!-- The strip a phone typing into this device shows above the tools (mytop-project/tracker#903). -->
+    <string name="remote_typing">Phone connected · typing</string>
+    <string name="remote_typing_sent">Phone connected · typing · %1$s</string>
+    <string name="remote_not_received">Not received. %1$s</string>
+    <string name="tool_pin">Pin</string>
+    <string name="tool_unpin">Unpin</string>
+    <string name="tool_delete">Delete</string>
+    <!-- The clipboard panel (mytop-project/tracker#903 H12d). -->
+    <string name="clip_hint">Tap a clip to paste it. Hold it, or press X on a pad, to pin or delete it.</string>
+    <string name="clip_clear_unpinned">Clear unpinned</string>
+    <plurals name="clip_clear_ask">
+        <item quantity="one">Clear %1$d unpinned clip? Pinned clips stay.</item>
+        <item quantity="other">Clear %1$d unpinned clips? Pinned clips stay.</item>
+    </plurals>
+    <string name="clip_cancel">Cancel</string>
+    <string name="clip_paste">Paste</string>
+    <string name="clip_pin_mark" translatable="false">📌</string>
+    <string name="clip_group_pinned">Pinned</string>
+    <string name="clip_group_recent">Recent</string>
+    <string name="clip_group_older">Earlier</string>
+    <string name="clip_search">Search</string>
+    <string name="clip_search_prompt">Search clips: type on the keyboard</string>
+    <string name="clip_search_query">Search clips: %1$s</string>
+    <string name="clip_no_match">No clip matches.</string>
+    <string name="clip_age_now">now</string>
+    <string name="clip_age_minutes">%1$d min</string>
+    <string name="clip_age_hours">%1$d h</string>
+    <string name="clip_age_yesterday">yesterday</string>
+    <string name="clip_age_days">%1$d days</string>
+    <string name="clip_age_weeks">%1$d wk</string>
+    <string name="clip_keep_status">Unpinned clips are kept for %1$s.</string>
+    <string name="tool_macro_problems_more">". %1$d more like it."</string>
+    <string name="tool_macros_empty">None yet. In the keyboard settings, Editing helpers, write one per line: name = C-b c</string>
+    <!-- The emoji panel (mytop-project/tracker#342, #772). -->
+    <string name="emoji_search">Search</string>
+    <string name="emoji_loading">Loading emoji…</string>
+    <string name="emoji_recent">Recent</string>
+    <string name="emoji_recent_empty">Nothing used yet</string>
+    <string name="emoji_search_prompt">Search emoji: type on the keyboard</string>
+    <string name="emoji_search_query">Search emoji: %1$s</string>
+    <string name="emoji_group_smileys">Smileys</string>
+    <string name="emoji_group_people">People</string>
+    <string name="emoji_group_nature">Nature</string>
+    <string name="emoji_group_food">Food</string>
+    <string name="emoji_group_travel">Travel</string>
+    <string name="emoji_group_activities">Activities</string>
+    <string name="emoji_group_objects">Objects</string>
+    <string name="emoji_group_symbols">Symbols</string>
+    <string name="emoji_group_flags">Flags</string>
+    <string name="emoji_group_kaomoji">Kaomoji</string>
+    <!-- GIFs and stickers from the person's own folders (mytop-project/tracker#903 H5). -->
+    <string name="emoji_group_gifs">GIFs</string>
+    <string name="emoji_group_stickers">Stickers</string>
+    <string name="gif_loading">Loading…</string>
+    <string name="gif_no_folders">No folders yet. Add one in the keyboard settings: GIF and sticker folders.</string>
+    <string name="gif_no_gifs">No GIFs in your folders.</string>
+    <string name="gif_no_stickers">No stickers in your folders.</string>
+    <string name="gif_search_prompt">Search GIFs: type on the keyboard</string>
+    <string name="gif_search_query">Search GIFs: %1$s</string>
+    <string name="sticker_search_prompt">Search stickers: type on the keyboard</string>
+    <string name="sticker_search_query">Search stickers: %1$s</string>
+    <string name="gif_not_accepted">This field does not take images.</string>
+    <string name="gif_not_taken">The app did not take the image.</string>
+    <string name="gif_too_large">That image is too large to send.</string>
+    <string name="gif_unreadable">Couldn\'t read that image. Rescan its folder in the keyboard settings.</string>
+    <string name="title_gif_folders">GIF and sticker folders</string>
+    <string name="summary_gif_folders">Folders of GIF, WebP and PNG images for the emoji panel\'s GIFs and Stickers tabs. Your files stay where they are.</string>
+    <string name="gif_folder_add">Add folder</string>
+    <string name="gif_folder_rescan">Rescan</string>
+    <string name="gif_folder_remove">Remove %1$s</string>
+    <string name="gif_folder_removed">Removed %1$s</string>
+    <string name="gif_folders_scanning">Reading the folders…</string>
+    <string name="gif_folders_scanned">Images found: %1$d.</string>
+    <string name="gif_folders_unreadable">Couldn\'t read some folders: %1$d. Remove them and add them again.</string>
+    <string name="gif_folder_not_kept">Android did not let the keyboard keep reading that folder. Pick it again, or another folder.</string>
+    <!-- Why a wordlist was not added (mytop-project/tracker#339, #772). -->
+    <string name="dictionary_refused_no_language">The wordlist doesn\'t say its language. Its first line needs locale=</string>
+    <string name="dictionary_refused_no_words">The wordlist has no words</string>
+    <string name="dictionary_refused_engine">This language\'s dictionary does not fit the keyboard\'s engine: %1$s</string>
+    <string name="dictionary_refused_not_saved">Couldn\'t save the dictionary</string>
+    <string name="dictionary_refused_not_opened">Couldn\'t open the file</string>
+    <string name="dictionary_refused_not_read">Couldn\'t read the file: %1$s</string>
 </resources>

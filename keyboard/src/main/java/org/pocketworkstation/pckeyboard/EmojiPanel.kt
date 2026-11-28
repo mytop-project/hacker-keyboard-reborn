@@ -18,7 +18,8 @@ import android.widget.TextView
 /**
  * The emoji panel (docs/SPEC.md 6a, "Emoji panel and search", mytop-project/tracker#342): a row of group buttons (Recent
  * first), a grid of the group's emoji, and Search and Back. Takes the key grid's place like the other tool panels.
- * Emoji are listed from [EmojiAssets] once loaded; a tap calls [onPick].
+ * Emoji are listed from [EmojiAssets] once loaded; a tap calls [onPick]. With [gifs], GIFs and Stickers tabs follow
+ * Kaomoji (mytop-project/tracker#903 H5, GifPanel.kt).
  */
 internal class EmojiBrowser(
     context: Context,
@@ -26,16 +27,26 @@ internal class EmojiBrowser(
     private val onPick: (String) -> Unit,
     private val onSearch: () -> Unit,
     private val onBack: () -> Unit,
+    private val gifs: GifTabs? = null,
 ) : LinearLayout(context) {
-    private val adapter = EmojiAdapter(context)
+    // Light beside a light keyboard, dark beside every other theme (KeyboardAppearance, mytop-project/tracker#562).
+    private val colors = KeyboardAppearance.colors(context)
+    private val adapter = EmojiAdapter(context, colors.text)
     private val grid = GridView(context)
     private val groupRow = LinearLayout(context)
     private var catalog: EmojiCatalog? = null
     private var selected: String = RECENT
+    // An emoji's skin tones, shown above the grid on a long press (mytop-project/tracker#903 H4).
+    private val toneRow = LinearLayout(context)
+    private val toneScroll = HorizontalScrollView(context)
+
+    // The GIFs or Stickers tab while one is shown (mytop-project/tracker#903 H5); null on an emoji tab.
+    private var gifKind: GifKind? = null
+    private val gifAdapter by lazy { GifGridAdapter(context, colors.text) }
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(PANEL)
+        setBackgroundColor(colors.panel)
         val header = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), 0)
@@ -48,9 +59,21 @@ internal class EmojiBrowser(
             },
             LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
         )
-        header.addView(button("Search") { onSearch() })
-        header.addView(button("Back") { onBack() })
+        header.addView(
+            button(context.getString(R.string.emoji_search)) {
+                val kind = gifKind
+                if (kind != null && gifs != null) gifs.onSearch(kind) else onSearch()
+            },
+        )
+        header.addView(button(context.getString(R.string.tool_back)) { onBack() })
         addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        toneScroll.apply {
+            isHorizontalScrollBarEnabled = false
+            isFocusable = false
+            visibility = GONE
+            addView(toneRow)
+        }
+        addView(toneScroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         grid.apply {
             numColumns = GridView.AUTO_FIT
             columnWidth = dp(46)
@@ -58,50 +81,108 @@ internal class EmojiBrowser(
             isFocusable = false
             selector = ColorDrawable(Color.TRANSPARENT)
             this.adapter = this@EmojiBrowser.adapter
-            onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ -> onPick(this@EmojiBrowser.adapter.items[position]) }
+            onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+                if (gifKind != null) gifAdapter.itemAt(position)?.let { gifs?.onPick(it) } else onPick(this@EmojiBrowser.adapter.items[position])
+            }
+            // A long press on an emoji with skin tones offers them all; the one picked is typed and its tone kept.
+            onItemLongClickListener = AdapterView.OnItemLongClickListener { _, _, position, _ ->
+                if (gifKind != null) return@OnItemLongClickListener false
+                val entry = this@EmojiBrowser.adapter.items.getOrNull(position)?.let { catalog?.entryOf(it) }
+                if (entry == null || entry.variants.isEmpty()) false else { showTones(entry); true }
+            }
         }
         addView(grid, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-        adapter.show(listOf("Loading emoji..."), loading = true)
+        adapter.show(listOf(context.getString(R.string.emoji_loading)), loading = true)
         EmojiAssets.load(context) { loaded ->
             catalog = loaded
             buildGroups()
-            select(if (recent().isEmpty()) loaded.groups.firstOrNull()?.id ?: RECENT else RECENT)
+            select(if (recent().isEmpty()) loaded.groups.firstOrNull()?.id ?: RECENT else RECENT, animate = false)
         }
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private fun button(label: String, onClick: () -> Unit): Button = Button(context).apply {
-        text = label
-        setAllCaps(false)
-        textSize = 13f
-        setTextColor(Color.WHITE)
-        setBackgroundColor(Color.TRANSPARENT)
-        minHeight = 0
-        minimumHeight = 0
-        minWidth = 0
-        minimumWidth = 0
-        setPadding(dp(10), dp(6), dp(10), dp(6))
-        isFocusable = false
-        setOnClickListener { onClick() }
-    }
+    private fun button(label: String, onClick: () -> Unit): Button = flatButton(context, colors, label, paddingDp = 10, onClick = onClick)
 
     private fun buildGroups() {
         groupRow.removeAllViews()
-        groupRow.addView(button("Recent") { select(RECENT) })
-        catalog?.groups?.forEach { group -> groupRow.addView(button(groupLabel(group.id)) { select(group.id) }) }
+        groupRow.addView(button(context.getString(R.string.emoji_recent)) { select(RECENT) })
+        catalog?.groups?.forEach { group -> groupRow.addView(button(groupLabel(context, group.id)) { select(group.id) }) }
+        if (gifs != null) {
+            groupRow.addView(button(context.getString(R.string.emoji_group_gifs)) { selectGifs(GifKind.GIF) })
+            groupRow.addView(button(context.getString(R.string.emoji_group_stickers)) { selectGifs(GifKind.STICKER) })
+        }
     }
 
-    private fun select(id: String) {
+    /**
+     * The GIFs or Stickers tab: the images of the picked folders, recently used first, as first-frame thumbnails. The
+     * index is read off the main thread the first time ([GifIndex]); until then the grid says it is loading.
+     */
+    private fun selectGifs(kind: GifKind) {
+        val tabs = gifs ?: return
+        gifKind = kind
+        toneScroll.visibility = GONE
+        grid.columnWidth = dp(GifGridAdapter.CELL_DP)
+        if (grid.adapter !== gifAdapter) grid.adapter = gifAdapter
+        gifAdapter.note(context.getString(R.string.gif_loading))
+        tabs.provider.search("", kind, tabs.recent(), GifTabs.LIMIT) { found ->
+            if (gifKind != kind) return@search
+            when {
+                found.isNotEmpty() -> gifAdapter.show(found)
+                !tabs.hasFolders() -> gifAdapter.note(context.getString(R.string.gif_no_folders))
+                else -> gifAdapter.note(context.getString(if (kind == GifKind.STICKER) R.string.gif_no_stickers else R.string.gif_no_gifs))
+            }
+        }
+    }
+
+    private fun showTones(entry: EmojiEntry) {
+        toneRow.removeAllViews()
+        (listOf(entry.emoji) + entry.variants).forEach { choice ->
+            toneRow.addView(
+                TextView(context).apply {
+                    text = choice
+                    textSize = 26f
+                    setTextColor(colors.text)
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    setOnClickListener {
+                        EmojiTones.toneOfPick(entry, choice)?.let { tone ->
+                            ToolsPrefs.prefs(context).edit().putInt(EmojiTones.PREF, tone).apply()
+                        }
+                        toneScroll.visibility = GONE
+                        onPick(choice)
+                    }
+                },
+            )
+        }
+        toneScroll.visibility = VISIBLE
+    }
+
+    private fun select(id: String, animate: Boolean = true) {
+        // The new group slides in from its side of the row (mytop-project/tracker#903 H12a): Recent first, Kaomoji last.
+        val from = order(selected)
+        val to = order(id)
         selected = id
-        val items = if (id == RECENT) recent() else catalog?.groups?.firstOrNull { it.id == id }?.entries?.map { it.emoji } ?: emptyList()
-        adapter.show(if (items.isEmpty() && id == RECENT) listOf("Nothing used yet") else items, loading = items.isEmpty())
+        gifKind = null
+        if (grid.adapter !== adapter) grid.adapter = adapter
+        toneScroll.visibility = GONE
+        // Kaomoji are wide: fewer, wider cells in smaller type (mytop-project/tracker#903 H4).
+        val wide = id == Kaomoji.GROUP
+        grid.columnWidth = dp(if (wide) 128 else 46)
+        adapter.wide = wide
+        val tone = ToolsPrefs.prefs(context).getInt(EmojiTones.PREF, 0)
+        val items = if (id == RECENT) recent() else catalog?.groups?.firstOrNull { it.id == id }?.entries?.map { EmojiTones.shown(it, tone) } ?: emptyList()
+        adapter.show(if (items.isEmpty() && id == RECENT) listOf(context.getString(R.string.emoji_recent_empty)) else items, loading = items.isEmpty())
+        if (animate && from != to) PanelMotion.swap(grid, (if (to > from) 1 else -1) * dp(GROUP_SLIDE_DP).toFloat())
     }
 
-    private class EmojiAdapter(private val context: Context) : BaseAdapter() {
+    /** A group's place in the row: Recent first, then the data's groups in order (Kaomoji last). */
+    private fun order(id: String): Int = if (id == RECENT) -1 else catalog?.groups?.indexOfFirst { it.id == id } ?: -1
+
+    private class EmojiAdapter(private val context: Context, private val textColor: Int) : BaseAdapter() {
         var items: List<String> = emptyList()
             private set
         private var note = false
+
+        /** Kaomoji cells: smaller type, so a whole face fits a cell. */
+        var wide = false
 
         fun show(list: List<String>, loading: Boolean) {
             items = list
@@ -123,10 +204,11 @@ internal class EmojiBrowser(
             val density = context.resources.displayMetrics.density
             val view = (convertView as? TextView) ?: TextView(context).apply {
                 gravity = Gravity.CENTER
-                setTextColor(Color.WHITE)
+                setTextColor(textColor)
                 layoutParams = AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (44 * density).toInt())
             }
-            view.textSize = if (note) 13f else 26f
+            view.textSize = if (note) 13f else if (wide) 15f else 26f
+            view.maxLines = 1
             view.text = items[position]
             return view
         }
@@ -134,20 +216,26 @@ internal class EmojiBrowser(
 
     companion object {
         private const val RECENT = "recent"
-        private val PANEL = Color.rgb(41, 42, 45)
+
+        /** How far a group's emoji slide in when it is picked. */
+        private const val GROUP_SLIDE_DP = 16
 
         /** The button text for a group id of the emoji data. */
-        fun groupLabel(id: String): String = when (id) {
-            "smileys_emotion" -> "Smileys"
-            "people_body" -> "People"
-            "animals_nature" -> "Nature"
-            "food_drink" -> "Food"
-            "travel_places" -> "Travel"
-            "activities" -> "Activities"
-            "objects" -> "Objects"
-            "symbols" -> "Symbols"
-            "flags" -> "Flags"
-            else -> id.replace('_', ' ')
+        fun groupLabel(context: Context, id: String): String {
+            val name = when (id) {
+                "smileys_emotion" -> R.string.emoji_group_smileys
+                "people_body" -> R.string.emoji_group_people
+                "animals_nature" -> R.string.emoji_group_nature
+                "food_drink" -> R.string.emoji_group_food
+                "travel_places" -> R.string.emoji_group_travel
+                "activities" -> R.string.emoji_group_activities
+                "objects" -> R.string.emoji_group_objects
+                "symbols" -> R.string.emoji_group_symbols
+                "flags" -> R.string.emoji_group_flags
+                Kaomoji.GROUP -> R.string.emoji_group_kaomoji
+                else -> return id.replace('_', ' ')
+            }
+            return context.getString(name)
         }
     }
 }
@@ -162,32 +250,24 @@ internal class EmojiSearchBar(
     private val onPick: (String) -> Unit,
     private val onDone: () -> Unit,
 ) : LinearLayout(context), KeyboardCapture.Target {
+    private val colors = KeyboardAppearance.colors(context)
     private val query = StringBuilder()
     private val label = TextView(context)
     private val results = LinearLayout(context)
+    private val cells = ArrayList<TextView>()
     private var catalog: EmojiCatalog? = EmojiAssets.current()
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(Color.rgb(41, 42, 45))
+        setBackgroundColor(colors.panel)
         val top = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         label.apply {
             textSize = 15f
-            setTextColor(Color.WHITE)
+            setTextColor(colors.text)
             setPadding(dp(12), dp(6), dp(8), dp(6))
         }
         top.addView(label, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(
-            Button(context).apply {
-                text = "Done"
-                setAllCaps(false)
-                textSize = 13f
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.TRANSPARENT)
-                isFocusable = false
-                setOnClickListener { onDone() }
-            },
-        )
+        top.addView(flatButton(context, colors, context.getString(R.string.label_done_key), onClick = onDone))
         addView(top)
         addView(
             HorizontalScrollView(context).apply {
@@ -200,8 +280,6 @@ internal class EmojiSearchBar(
         refresh()
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         KeyboardCapture.set(this)
@@ -213,12 +291,12 @@ internal class EmojiSearchBar(
     }
 
     override fun key(code: Int): Boolean = when {
-        code == -5 || code == 8 -> {
+        code == Keyboard.KEYCODE_DELETE || code == '\b'.code -> {
             if (query.isNotEmpty()) query.setLength(query.length - 1)
             refresh()
             true
         }
-        code == 10 -> {
+        code == '\n'.code -> {
             onDone()
             true
         }
@@ -237,19 +315,23 @@ internal class EmojiSearchBar(
     }
 
     private fun refresh() {
-        label.text = if (query.isEmpty()) "Search emoji: type on the keyboard" else "Search emoji: $query"
-        results.removeAllViews()
+        label.text = if (query.isEmpty()) context.getString(R.string.emoji_search_prompt) else context.getString(R.string.emoji_search_query, query)
         val found = catalog?.search(query.toString()).orEmpty()
-        for (entry in found) {
-            results.addView(
-                TextView(context).apply {
-                    text = entry.emoji
-                    textSize = 26f
-                    setTextColor(Color.WHITE)
-                    setPadding(dp(8), dp(2), dp(8), dp(2))
-                    setOnClickListener { onPick(entry.emoji) }
-                },
-            )
+        // The result cells are made once and reused, so a key typed into the search changes text, not views.
+        found.forEachIndexed { i, entry ->
+            val cell = cells.getOrNull(i) ?: TextView(context).apply {
+                textSize = 26f
+                setTextColor(colors.text)
+                setPadding(dp(8), dp(2), dp(8), dp(2))
+                cells += this
+                results.addView(this)
+            }
+            // In the skin tone last picked (mytop-project/tracker#903 H4).
+            val shown = EmojiTones.shown(entry, ToolsPrefs.prefs(context).getInt(EmojiTones.PREF, 0))
+            cell.text = shown
+            cell.visibility = View.VISIBLE
+            cell.setOnClickListener { onPick(shown) }
         }
+        for (i in found.size until cells.size) cells[i].visibility = View.GONE
     }
 }

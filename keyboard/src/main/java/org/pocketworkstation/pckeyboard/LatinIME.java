@@ -18,7 +18,6 @@ package org.pocketworkstation.pckeyboard;
 
 import org.pocketworkstation.pckeyboard.LatinIMEUtil.RingCharBuffer;
 
-import com.google.android.voiceime.VoiceRecognitionTrigger;
 
 import org.xmlpull.v1.XmlPullParserException;
 
@@ -43,7 +42,6 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.SystemClock;
-import android.os.Vibrator;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceManager;
 import androidx.core.app.NotificationCompat;
@@ -53,7 +51,6 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.PrintWriterPrinter;
 import android.util.Printer;
-import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.View;
 import androidx.annotation.RequiresApi;
@@ -95,8 +92,6 @@ public class LatinIME extends InputMethodService implements
     static Map<Integer, String> ESC_SEQUENCES;
     static Map<Integer, Integer> CTRL_SEQUENCES;
 
-    private static final String PREF_VIBRATE_ON = "vibrate_on";
-    static final String PREF_VIBRATE_LEN = "vibrate_len";
     private static final String PREF_SOUND_ON = "sound_on";
     private static final String PREF_POPUP_ON = "popup_on";
     private static final String PREF_AUTO_CAP = "auto_cap";
@@ -163,6 +158,20 @@ public class LatinIME extends InputMethodService implements
     private AlertDialog mOptionsDialog;
 
     /* package */KeyboardSwitcher mKeyboardSwitcher;
+    // droidtop: the pad on the keyboard (mytop-project/tracker#338).
+    private final PadKeys mPadKeys = new PadKeys(this);
+    // droidtop: the dictionaries the keyboard last loaded (mytop-project/tracker#339).
+    private int mDictionaryGeneration;
+    // droidtop: glide typing (mytop-project/tracker#341): the guesser for the shown keyboard, and the word a glide last
+    // typed with the others it offered, so picking one of those replaces it.
+    private final GlideTyping mGlide = new GlideTyping(words -> {
+        onGlideWords(words);
+        return kotlin.Unit.INSTANCE;
+    });
+    private String mGlideWord;
+    static final String PREF_GLIDE = "pref_glide";
+    // droidtop: the strip says offline voice typing is listening, and a tap on it stops (mytop-project/tracker#343).
+    private boolean mShowingVoiceHint;
 
     private UserDictionary mUserDictionary;
     private UserBigramDictionary mUserBigramDictionary;
@@ -175,10 +184,22 @@ public class LatinIME extends InputMethodService implements
     private String mSystemLocale;
     private LanguageSwitcher mLanguageSwitcher;
 
-    private StringBuilder mComposing = new StringBuilder();
-    private WordComposer mWord = new WordComposer();
+    // droidtop (mytop-project/tracker#903 H6): the word being composed (Hacker's mComposing, mWord and mPredicting) lives in
+    // the Latin engine, which LatinIME reads and writes where it read its own fields; the engine seam is mEngine.
+    private final LatinEngine mLatin = new LatinEngine(new LatinEngine.Host() {
+        public boolean predictionOnForMode() { return mPredictionOnForMode; }
+        public boolean showSuggestions() { return mShowSuggestions; }
+        public boolean suggestionForceOn() { return mSuggestionForceOn; }
+        public boolean suggestionForceOff() { return mSuggestionForceOff; }
+        public boolean suggestionsInLandscape() { return mSuggestionsInLandscape; }
+        public boolean portrait() { return isPortrait(); }
+        public int correctionMode() { return mCorrectionMode; }
+    });
+    /** The engine keys go to: Hacker's Latin path, or a language's own ({@link InputEngines}) driven by {@link #mSession}. */
+    private InputEngine mEngine = mLatin;
+    /** Drives {@link #mEngine} when it is not the Latin one; null while Hacker's own path types. */
+    private EngineSession mSession;
     private int mCommittedLength;
-    private boolean mPredicting;
     private boolean mEnableVoiceButton;
     private CharSequence mBestWord;
     private boolean mPredictionOnForMode;
@@ -200,8 +221,8 @@ public class LatinIME extends InputMethodService implements
     // Saved shift state when leaving alphabet mode, or when applying multitouch shift
     private int mSavedShiftState;
     private boolean mPasswordText;
-    private boolean mVibrateOn;
-    private int mVibrateLen;
+    // droidtop patch (mytop-project/tracker#903 H12a): a haptic per key class at the "Vibration strength" chosen.
+    private KeyHapticsPlayer mHaptics;
     private boolean mSoundOn;
     private boolean mPopupOn;
     private boolean mAutoCapPref;
@@ -287,7 +308,6 @@ public class LatinIME extends InputMethodService implements
     private PluginManager mPluginManager;
     private NotificationReceiver mNotificationReceiver;
 
-    private VoiceRecognitionTrigger mVoiceRecognitionTrigger;
 
     public abstract static class WordAlternatives {
         protected CharSequence mChosenWord;
@@ -361,6 +381,9 @@ public class LatinIME extends InputMethodService implements
         KeyboardSwitcher.init(this);
         super.onCreate();
         sInstance = this;
+        mHaptics = new KeyHapticsPlayer(this);
+        // droidtop: whether offline voice typing's download is in place, read off the main thread (mytop-project/tracker#343).
+        OfflineVoice.refresh(this);
         // setStatusIcon(R.drawable.ime_qwerty);
         mResources = getResources();
         final Configuration conf = mResources.getConfiguration();
@@ -401,9 +424,11 @@ public class LatinIME extends InputMethodService implements
         mSwipeRightAction = prefs.getString(PREF_SWIPE_RIGHT, res.getString(R.string.default_swipe_right));
         mVolUpAction = prefs.getString(PREF_VOL_UP, res.getString(R.string.default_vol_up));
         mVolDownAction = prefs.getString(PREF_VOL_DOWN, res.getString(R.string.default_vol_down));
+        KeyboardForm.migrate(prefs); // droidtop patch (mytop-project/tracker#903 H1): shapes per orientation
+        KeyboardModes.migrate(prefs); // droidtop patch (mytop-project/tracker#903 H12c): one store for shapes and modes
+        KeyHapticsPlayer.migrate(prefs); // droidtop patch (#903 H12a): Vibrate on keypress becomes Vibration strength
         sKeyboardSettings.initPrefs(prefs, res);
 
-        mVoiceRecognitionTrigger = new VoiceRecognitionTrigger(this);
         
         updateKeyboardOptions();
 
@@ -547,10 +572,10 @@ public class LatinIME extends InputMethodService implements
         return (mOrientation == Configuration.ORIENTATION_PORTRAIT);
     }
 
+    // droidtop (mytop-project/tracker#903 H6): where Hacker's composes, and so where it does not (suggestions off, the
+    // terminal preset, a password), is the Latin engine's capability; the rules moved there unchanged.
     private boolean suggestionsDisabled() {
-        if (mSuggestionForceOff) return true;
-        if (mSuggestionForceOn) return false;
-        return !(mSuggestionsInLandscape || isPortrait());
+        return mLatin.suggestionsDisabled();
     }
 
     /**
@@ -613,6 +638,14 @@ public class LatinIME extends InputMethodService implements
 
         int[] dictionaries = getDictionary(orig);
         mSuggest = new Suggest(this, dictionaries);
+        mLatin.setLexicon(mSuggest);
+        // droidtop: a dictionary the person added for this language, loaded off the main thread (mytop-project/tracker#339).
+        final Suggest created = mSuggest;
+        mDictionaryGeneration = KeyboardDictionaries.getGeneration();
+        KeyboardDictionaries.loadInto(this, created, locale, () -> mSuggest == created, this::updateCorrectionMode);
+        // droidtop: glide guesses from the same language's words (mytop-project/tracker#341), read when a keyboard shows.
+        final String glideLocale = locale;
+        mGlide.setWords(() -> KeyboardDictionaries.INSTANCE.glideWords(this, glideLocale));
         updateAutoTextEnabled(saveLocale);
         if (mUserDictionary != null)
             mUserDictionary.close();
@@ -640,9 +673,188 @@ public class LatinIME extends InputMethodService implements
         mSentenceSeparators = mResources
                 .getString(R.string.sentence_separators);
         initSuggestPuncList();
+        // droidtop (mytop-project/tracker#903 H6): a language with an engine of its own (none yet; H7 to H9) types through it.
+        useEngine(InputEngines.forLanguage(this, locale));
 
         conf.locale = saveLocale;
         orig.updateConfiguration(conf, orig.getDisplayMetrics());
+    }
+
+    /** droidtop (mytop-project/tracker#903 H6): the engine keys go to; Hacker's Latin path when [engine] is null. */
+    private void useEngine(InputEngine engine) {
+        if (mSession != null) mSession.close();
+        mEngine = engine != null ? engine : mLatin;
+        mSession = null;
+        if (mEngine != mLatin) {
+            final String name = inputLanguageName();
+            mSession = new EngineSession(mEngine, new SessionEditor(), getString(R.string.engine_getting_ready, name),
+                    percent -> getString(R.string.engine_getting_ready_percent, name, percent));
+        }
+    }
+
+    /**
+     * The input language's name for the strip's line while its own engine loads (#903 H7a): "Japanese is getting
+     * ready…", with how far its data has come once the engine can say (#903 H7c): "Japanese is getting ready… 40%".
+     */
+    private String inputLanguageName() {
+        final String language = mInputLocale == null ? "" : mInputLocale.split("_")[0];
+        final String name = new Locale(language).getDisplayLanguage();
+        return name.isEmpty() ? language : name;
+    }
+
+    /** The strip's mode button (#903 H7a): the engine's next composition mode. */
+    void cycleEngineMode() {
+        if (mSession != null) mSession.cycleMode();
+    }
+
+    /** The field and the candidate bar, as a language's own engine writes them (EngineSession). */
+    private final class SessionEditor implements EngineSession.Editor {
+        private boolean mComposed;
+
+        public void setComposing(InputEngine.Composing composing) {
+            // Nothing composed and nothing shown: the field is left alone.
+            if (composing.isEmpty() && !mComposed) return;
+            mComposed = !composing.isEmpty();
+            InputConnection ic = getCurrentInputConnection();
+            if (ic == null) return;
+            final CharSequence text = styledComposing(composing);
+            final int fromEnd = text.length() - composing.getCaret();
+            if (fromEnd <= 0) {
+                ic.setComposingText(text, 1);
+                return;
+            }
+            // The caret inside the composing text (#903 H7a): setComposingText's newCursorPosition reaches only its
+            // ends, so the caret is set after it, in one batch so the field reports one selection.
+            ic.beginBatchEdit();
+            ic.setComposingText(text, 1);
+            ExtractedText et = ic.getExtractedText(new ExtractedTextRequest(), 0);
+            if (et != null && et.selectionStart >= 0) {
+                final int caret = et.startOffset + et.selectionStart - fromEnd;
+                ic.setSelection(caret, caret);
+            }
+            ic.endBatchEdit();
+        }
+
+        public void deleteBefore(int count) {
+            InputConnection ic = getCurrentInputConnection();
+            if (ic == null) return;
+            // The count is from the composing text's start (Mozc's deletion_range), so what is composed goes first;
+            // the session draws it again after.
+            if (mComposed) ic.setComposingText("", 1);
+            mComposed = false;
+            ic.deleteSurroundingText(count, 0);
+        }
+
+        public CharSequence textBeforeCaret(int max) {
+            InputConnection ic = getCurrentInputConnection();
+            final CharSequence before = ic != null ? ic.getTextBeforeCursor(max, 0) : null;
+            return before != null ? before : "";
+        }
+
+        public void commit(CharSequence text) {
+            mComposed = false;
+            InputConnection ic = getCurrentInputConnection();
+            if (ic != null) ic.commitText(text, 1);
+        }
+
+        public void finishComposing() {
+            mComposed = false;
+            InputConnection ic = getCurrentInputConnection();
+            if (ic != null) ic.finishComposingText();
+        }
+
+        public void showCandidates(CandidateBar bar) {
+            // The strip is up whenever the engine wants it (setCandidatesViewShownInternal), so only its content changes.
+            if (mCandidateView != null) {
+                mShowingVoiceHint = false;
+                mCandidateView.showEngineCandidates(bar);
+            }
+        }
+    }
+
+    /** A CJK preedit: each clause underlined, the one being converted on the accent's tint. Plain text as it is. */
+    private CharSequence styledComposing(InputEngine.Composing composing) {
+        List<InputEngine.Segment> segments = composing.getSegments();
+        if (segments.isEmpty()) return composing.getText();
+        android.text.SpannableStringBuilder out = new android.text.SpannableStringBuilder(composing.getText());
+        int tint = (KeyboardAppearance.colors(this).getAccent() & 0x00FFFFFF) | 0x66000000;
+        for (int i = 0; i < segments.size(); i++) {
+            InputEngine.Segment segment = segments.get(i);
+            int start = Math.max(0, Math.min(segment.getStart(), out.length()));
+            int end = Math.max(start, Math.min(segment.getEnd(), out.length()));
+            if (end == start) continue;
+            out.setSpan(new android.text.style.UnderlineSpan(), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (i == composing.getFocused()) {
+                out.setSpan(new android.text.style.BackgroundColorSpan(tint), start, end,
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+        return out;
+    }
+
+    /** A key for a language's own engine: true when it took it; otherwise what it composed goes in first. */
+    private boolean sessionTakes(int primaryCode, int[] keyCodes) {
+        boolean taken = false;
+        if (!mModCtrl && !mModAlt && !mModMeta) {
+            if (primaryCode == ASCII_SPACE) {
+                taken = mSession.onKey(InputEngine.Key.SPACE);
+            } else if (primaryCode == ASCII_ENTER) {
+                taken = mSession.onKey(InputEngine.Key.ENTER);
+            } else {
+                taken = mSession.onChar(primaryCode, keyCodes);
+            }
+        }
+        if (taken) {
+            updateShiftKeyState(getCurrentInputEditorInfo());
+        } else {
+            mSession.commit();
+        }
+        return taken;
+    }
+
+    /**
+     * droidtop (mytop-project/tracker#903 H7a): an arrow or Escape, from the keys ([code] is the keyboard's own negative code)
+     * or a hardware keyboard (the negated KeyEvent code), to a language's own engine while it composes. False leaves it
+     * to do what it always did.
+     */
+    private boolean sessionNavigates(int code, boolean shifted) {
+        if (mSession == null || mModCtrl || mModAlt || mModMeta) return false;
+        final InputEngine.Key key;
+        switch (code) {
+        case LatinKeyboardView.KEYCODE_DPAD_LEFT:
+            key = shifted ? InputEngine.Key.SHIFT_LEFT : InputEngine.Key.LEFT;
+            break;
+        case LatinKeyboardView.KEYCODE_DPAD_RIGHT:
+            key = shifted ? InputEngine.Key.SHIFT_RIGHT : InputEngine.Key.RIGHT;
+            break;
+        case LatinKeyboardView.KEYCODE_DPAD_UP:
+            key = InputEngine.Key.UP;
+            break;
+        case LatinKeyboardView.KEYCODE_DPAD_DOWN:
+            key = InputEngine.Key.DOWN;
+            break;
+        case LatinKeyboardView.KEYCODE_ESCAPE:
+            key = InputEngine.Key.ESCAPE;
+            break;
+        default:
+            return false;
+        }
+        return mSession.onKey(key);
+    }
+
+    /** Hardware keys a language's own engine took on the way down, so their key up is its too. */
+    private final java.util.Set<Integer> mSessionKeysDown = new java.util.HashSet<Integer>();
+
+    /** The candidate strip, while it is on screen: for the pad (PadKeys) to reach. */
+    CandidateView candidateStrip() {
+        CandidateView strip = mCandidateView;
+        return strip != null && strip.isShown() ? strip : null;
+    }
+
+    /** How tall the expanded candidate grid is: the keyboard's own height under the strip. */
+    int candidateGridHeight() {
+        View keys = mToolsDeck != null ? mToolsDeck : mKeyboardSwitcher.getInputView();
+        return keys != null ? keys.getHeight() : 0;
     }
 
     @Override
@@ -694,6 +906,11 @@ public class LatinIME extends InputMethodService implements
         mConfigurationChanging = true;
         super.onConfigurationChanged(conf);
         mConfigurationChanging = false;
+        // droidtop patch (mytop-project/tracker#903 H12b): night mode and a new wallpaper's palette arrive as a
+        // configuration change; a modern theme follows them at once, not only at the next field.
+        if (mKeyboardSwitcher != null && mKeyboardSwitcher.getInputView() != null) {
+            mKeyboardSwitcher.refreshAppearance();
+        }
     }
 
     @Override
@@ -754,8 +971,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void resetPrediction() {
-        mComposing.setLength(0);
-        mPredicting = false;
+        mLatin.reset();
         mDeleteCount = 0;
         mJustAddedAutoSpace = false;
     }
@@ -767,6 +983,11 @@ public class LatinIME extends InputMethodService implements
         // showing its soft-input window. The second-screen keyboard uses
         // this connection even when Android declines to draw that window.
         SecondScreenKeyboard.onStartInput(getCurrentInputConnection(), attribute.inputType);
+        // droidtop patch (mytop-project/tracker#772, #903 H12d): the clipboard history keeps nothing copied while a password
+        // field, or an editor that asked for no personalised learning, has the keyboard. Noted here, as every field
+        // starts, and not in onStartInputView: with a hardware keyboard, or the keys on the add-on screen, Android
+        // starts the field without showing the input view, and a copy from a password field was then kept.
+        ClipboardHistoryStore.noteField(attribute.inputType, attribute.imeOptions);
     }
 
     @Override
@@ -776,6 +997,14 @@ public class LatinIME extends InputMethodService implements
         // policy, docs/SPEC.md 4c), so droidtop is told and can draw the
         // same keyboard on the editor's own screen itself.
         SecondScreenKeyboard.onShowRequested(attribute.packageName);
+        // droidtop patch (mytop-project/tracker#903 H12a): the animation settings, read once each time the keyboard shows.
+        KeyboardMotion.refresh(this);
+        // droidtop: the voice key asks again which keyboard dictates for this field (mytop-project/tracker#772).
+        VoiceInput.fieldStarted();
+        // droidtop: a dictionary added or removed since the last field is loaded now (mytop-project/tracker#339).
+        if (mDictionaryGeneration != KeyboardDictionaries.getGeneration() && mLanguageSwitcher != null) {
+            initSuggest(mLanguageSwitcher.getInputLanguage());
+        }
         sKeyboardSettings.editorPackageName = attribute.packageName;
         sKeyboardSettings.editorFieldName = attribute.fieldName;
         sKeyboardSettings.editorFieldId = attribute.fieldId;
@@ -783,12 +1012,17 @@ public class LatinIME extends InputMethodService implements
         sKeyboardSettings.editorImeOptions = attribute.imeOptions;
 
         //Log.i("PCKeyboard", "onStartInputView " + attribute + ", inputType= " + Integer.toHexString(attribute.inputType) + ", restarting=" + restarting);
+        // droidtop patch: a modern theme follows a change made while the keyboard was away (mytop-project/tracker#562, #903 H12b).
+        mKeyboardSwitcher.refreshAppearance();
         LatinKeyboardView inputView = mKeyboardSwitcher.getInputView();
         // In landscape mode, this method gets called without the input view
         // being created.
         if (inputView == null) {
             return;
         }
+        // droidtop: glide typing while its setting is on (mytop-project/tracker#341); a new field starts with no glided word.
+        mGlideWord = null;
+        inputView.setGlide(PreferenceManager.getDefaultSharedPreferences(this).getBoolean(PREF_GLIDE, true) ? mGlide : null);
 
         if (mRefreshKeyboardRequired) {
             mRefreshKeyboardRequired = false;
@@ -812,14 +1046,10 @@ public class LatinIME extends InputMethodService implements
                 mPasswordText = true;
             }
         }
-
         mEnableVoiceButton = shouldShowVoiceButton(attribute);
         final boolean enableVoiceButton = mEnableVoiceButton && mEnableVoice;
 
-        if (mVoiceRecognitionTrigger != null) {
-            mVoiceRecognitionTrigger.onStartInputView();
-        }
-        
+
         mInputTypeNoAutoCorrect = false;
         mPredictionOnForMode = false;
         mCompletionOn = false;
@@ -909,6 +1139,14 @@ public class LatinIME extends InputMethodService implements
         }
         inputView.closing();
         resetPrediction();
+        // droidtop (mytop-project/tracker#903 H6): a new field for the engine; a language's own one forgets the last, and
+        // is given the text before the caret (H7a).
+        if (mSession != null) {
+            mSession.leave();
+            mSession.startField(mPredictionOnForMode, mPasswordText);
+        } else {
+            mEngine.startField(mPredictionOnForMode, mPasswordText);
+        }
         loadSettings();
         updateShiftKeyState(attribute);
 
@@ -970,6 +1208,8 @@ public class LatinIME extends InputMethodService implements
         super.onFinishInput();
 
         onAutoCompletionStateChanged(false);
+        // A language's own engine keeps what it showed and saves what it learned (#903 H7a).
+        if (mSession != null) mSession.finishField();
 
         if (mKeyboardSwitcher.getInputView() != null) {
             mKeyboardSwitcher.getInputView().closing();
@@ -982,20 +1222,76 @@ public class LatinIME extends InputMethodService implements
 
     /**
      * droidtop patch (mytop-project/tracker#340): the input view with the tool strip above the keys (clipboard history,
-     * macros, incognito), or the keys alone when the strip is switched off.
+     * macros, incognito, the emoji panel with its GIFs and Stickers tabs), or the keys alone when the strip is switched off.
      */
     View wrapInputView(LatinKeyboardView keyboard) {
         final View view = ToolsDeck.wrap(this, keyboard, new ImeConnectionSink(), null, new Runnable() {
             public void run() {
                 // A tool types at the cursor: finish the word being composed first, as an arrow key does.
                 final InputConnection ic = getCurrentInputConnection();
-                if (ic != null && mPredicting) {
+                if (ic != null && (mLatin.predicting || mSession != null)) {
                     commitTyped(ic, true);
                 }
             }
-        }, null);
+        }, null, new Runnable() {
+            public void run() {
+                // The strip's Switch keyboard (mytop-project/tracker#717): the same move as the space bar's long press.
+                switchToNextKeyboard();
+            }
+        }, new ImeMediaTarget(this)); // GIFs and stickers go in through this editor's content channel (mytop-project/tracker#903 H5).
         mToolsDeck = view instanceof ToolsDeck ? (ToolsDeck) view : null;
+        // droidtop patch (mytop-project/tracker#903 H12c): the floating mode puts the keyboard in a frame over the app.
+        mFloatingFrame = null;
+        if (KeyboardModes.current(this) == KeyboardModes.Mode.FLOATING) {
+            mFloatingFrame = new FloatingKeyboardFrame(this, view, keyboard, KeyboardAppearance.colors(this));
+            if (mToolsDeck != null) mToolsDeck.addPadControls(mFloatingFrame.getControls());
+            return mFloatingFrame;
+        }
         return view;
+    }
+
+    /** The floating mode's frame around the input view, or null in every other mode (mytop-project/tracker#903 H12c). */
+    private FloatingKeyboardFrame mFloatingFrame;
+
+    /** The tool strip around the input view, for the pad (PadKeys); null with the strip off. */
+    ToolsDeck getToolsDeck() {
+        return mToolsDeck;
+    }
+
+    /** Whether the keyboard floats over the app now (mytop-project/tracker#903 H12c). */
+    private boolean isFloating() {
+        return mFloatingFrame != null && KeyboardModes.current(this) == KeyboardModes.Mode.FLOATING;
+    }
+
+    /**
+     * droidtop patch (mytop-project/tracker#903 H12c): the number pad's "=" types the answer to the sum before the cursor,
+     * or a plain "=" when there is none (a division by zero, no sum).
+     */
+    private void typeCalculation() {
+        final InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        commitTyped(ic, true);
+        final String answer = PadCalculator.answer(ic.getTextBeforeCursor(CALCULATION_LOOKBACK, 0));
+        ic.commitText(answer == null ? "=" : "=" + answer, 1);
+    }
+
+    /** How far back "=" looks for its sum. */
+    private static final int CALCULATION_LOOKBACK = 64;
+
+    /**
+     * droidtop patch (mytop-project/tracker#903 H4): emoji for the word just typed, on the tool strip. Only with a plain cursor
+     * (no selection), and never in a password or no-learning field (IncognitoRules.sensitiveField).
+     */
+    private void offerEmojiForWord(int selStart, int selEnd) {
+        if (mToolsDeck == null) return;
+        final InputConnection ic = getCurrentInputConnection();
+        final EditorInfo info = getCurrentInputEditorInfo();
+        final boolean sensitive = info == null || IncognitoRules.INSTANCE.sensitiveField(info.inputType, info.imeOptions);
+        String word = "";
+        if (ic != null && !sensitive && selStart == selEnd) {
+            word = EmojiWords.INSTANCE.lastWord(ic.getTextBeforeCursor(32, 0));
+        }
+        mToolsDeck.offerEmoji(word, sensitive);
     }
 
     /** The tool strip around the current input view, if there is one; shows the autofill suggestions. */
@@ -1014,7 +1310,7 @@ public class LatinIME extends InputMethodService implements
     @Override
     @RequiresApi(Build.VERSION_CODES.R)
     public boolean onInlineSuggestionsResponse(android.view.inputmethod.InlineSuggestionsResponse response) {
-        if (mToolsDeck == null || !ToolsPrefs.INSTANCE.inlineAutofill(this)) {
+        if (mToolsDeck == null || !mToolsDeck.getStripShown() || !ToolsPrefs.INSTANCE.inlineAutofill(this)) {
             return false;
         }
         InlineAutofill.show(this, response, mToolsDeck);
@@ -1043,6 +1339,10 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onFinishInputView(boolean finishingInput) {
         super.onFinishInputView(finishingInput);
+        // droidtop: dictation belongs to the field it started in (mytop-project/tracker#343).
+        OfflineVoiceTyping.finishInput();
+        mShowingVoiceHint = false;
+        mPadKeys.clear();
         SecondScreenKeyboard.onShowEnded();
         if (mToolsDeck != null) {
             mToolsDeck.clearInlineSuggestions();
@@ -1064,20 +1364,27 @@ public class LatinIME extends InputMethodService implements
             int candidatesEnd) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 candidatesStart, candidatesEnd);
+        offerEmojiForWord(newSelStart, newSelEnd);
+        // droidtop (mytop-project/tracker#903 H6): the cursor left what a language's own engine composes; it stays as typed.
+        // The engine may put the caret inside its text (H7a), so only a selection or a caret outside it counts.
+        if (mSession != null && mSession.getComposing()
+                && (newSelStart != newSelEnd || newSelStart < candidatesStart || newSelEnd > candidatesEnd)
+                && mLastSelectionStart != newSelStart) {
+            mSession.leave();
+        }
 
         // If the current selection in the text view changes, we should
         // clear whatever candidate text we have.
-        if ((((mComposing.length() > 0 && mPredicting))
+        if ((((mLatin.composing.length() > 0 && mLatin.predicting))
                 && (newSelStart != candidatesEnd || newSelEnd != candidatesEnd) && mLastSelectionStart != newSelStart)) {
-            mComposing.setLength(0);
-            mPredicting = false;
+            mLatin.reset();
             postUpdateSuggestions();
             TextEntryState.reset();
             InputConnection ic = getCurrentInputConnection();
             if (ic != null) {
                 ic.finishComposingText();
             }
-        } else if (!mPredicting && !mJustAccepted) {
+        } else if (!mLatin.predicting && !mJustAccepted) {
             switch (TextEntryState.getState()) {
             case ACCEPTED_DEFAULT:
                 TextEntryState.reset();
@@ -1105,7 +1412,7 @@ public class LatinIME extends InputMethodService implements
                         && (candidatesStart == candidatesEnd
                                 || newSelStart != oldSelStart || TextEntryState
                                 .isCorrecting())
-                        && (newSelStart < newSelEnd - 1 || (!mPredicting))) {
+                        && (newSelStart < newSelEnd - 1 || (!mLatin.predicting))) {
                     if (isCursorTouchingWord()
                             || mLastSelectionStart < mLastSelectionEnd) {
                         postUpdateOldSuggestions();
@@ -1203,20 +1510,24 @@ public class LatinIME extends InputMethodService implements
 //                " mCompletionOn=" + mCompletionOn +
 //                " mPredictionOnForMode=" + mPredictionOnForMode +
 //                " mPredictionOnPref=" + mPredictionOnPref +
-//                " mPredicting=" + mPredicting
+//                " mPredicting=" + mLatin.predicting
 //                );
         // TODO: Remove this if we support candidates with hard keyboard
+        // droidtop patch (mytop-project/tracker#903 H12c): the strip would sit at the top of the screen, away from a
+        // floating keyboard and outside the part of the window that takes touches, so it is not shown while floating.
         boolean visible = shown
+        && !isFloating()
         && onEvaluateInputViewShown()
         && mKeyboardSwitcher.getInputView() != null
-        && isPredictionOn()
+        && mEngine.wantsCandidateBar()
         && (needsInputViewShown
                 ? mKeyboardSwitcher.getInputView().isShown()
                         : true);
         if (visible) {
             if (mCandidateViewContainer == null) {
                 onCreateCandidatesView();
-                setNextSuggestions();
+                if (mSession == null) setNextSuggestions();
+                else mSession.refresh();
             }
         } else {
             if (mCandidateViewContainer != null) {
@@ -1265,6 +1576,12 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onComputeInsets(InputMethodService.Insets outInsets) {
         super.onComputeInsets(outInsets);
+        // droidtop patch (mytop-project/tracker#903 H12c): a floating keyboard leaves the app its whole screen and takes
+        // touches only inside its frame.
+        if (isFloating() && mFloatingFrame.isShown()) {
+            mFloatingFrame.computeInsets(outInsets);
+            return;
+        }
         if (!isFullscreenMode()) {
             outInsets.contentTopInsets = outInsets.visibleTopInsets;
         }
@@ -1278,7 +1595,9 @@ public class LatinIME extends InputMethodService implements
         // mode
         float dimen = getResources().getDimension(
                 R.dimen.max_height_for_fullscreen);
-        if (displayHeight > dimen || mFullscreenOverride || isConnectbot()) {
+        // droidtop patch (mytop-project/tracker#903 H12c): a floating keyboard never takes the screen for an extract view.
+        if (displayHeight > dimen || mFullscreenOverride || isConnectbot()
+                || KeyboardModes.current(this) == KeyboardModes.Mode.FLOATING) {
             return false;
         } else {
             return super.onEvaluateFullscreenMode();
@@ -1293,6 +1612,14 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        // droidtop: a pad drives the keyboard while it shows (mytop-project/tracker#338).
+        if (mPadKeys.onKeyDown(keyCode, event)) return true;
+        // droidtop (mytop-project/tracker#903 H7a): a hardware keyboard's arrows and Esc reach a language's own engine
+        // while it composes.
+        if (mSession != null && sessionNavigates(-keyCode, event.isShiftPressed())) {
+            mSessionKeysDown.add(keyCode);
+            return true;
+        }
         switch (keyCode) {
         case KeyEvent.KEYCODE_BACK:
             if (event.getRepeatCount() == 0
@@ -1318,6 +1645,8 @@ public class LatinIME extends InputMethodService implements
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (mPadKeys.onKeyUp(keyCode, event)) return true;
+        if (mSessionKeysDown.remove(keyCode)) return true;
         switch (keyCode) {
         case KeyEvent.KEYCODE_DPAD_DOWN:
         case KeyEvent.KEYCODE_DPAD_UP:
@@ -1364,19 +1693,22 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void commitTyped(InputConnection inputConnection, boolean manual) {
-        if (mPredicting) {
-            mPredicting = false;
-            if (mComposing.length() > 0) {
+        // droidtop (mytop-project/tracker#903 H6): a language's own engine puts what it composed in the field first.
+        if (mSession != null) mSession.commit();
+        if (mLatin.predicting) {
+            // The engine ends composing and gives the word as typed (Hacker's mComposing, kept for a revert).
+            final CharSequence typed = mLatin.commit();
+            if (typed.length() > 0) {
                 if (inputConnection != null) {
-                    inputConnection.commitText(mComposing, 1);
+                    inputConnection.commitText(typed, 1);
                 }
-                mCommittedLength = mComposing.length();
+                mCommittedLength = typed.length();
                 if (manual) {
-                    TextEntryState.manualTyped(mComposing);
+                    TextEntryState.manualTyped(typed);
                 } else {
-                    TextEntryState.acceptedTyped(mComposing);
+                    TextEntryState.acceptedTyped(typed);
                 }
-                addToDictionaries(mComposing,
+                addToDictionaries(typed,
                         AutoDictionary.FREQUENCY_FOR_TYPED);
             }
             updateSuggestions();
@@ -1568,6 +1900,21 @@ public class LatinIME extends InputMethodService implements
                  showOptionsMenu();
             }
         }
+    }
+
+    /**
+     * Moves to the next keyboard enabled on the device (mytop-project/tracker#717). With droidtop's keyboard the only one
+     * there is to move to, the system's picker opens instead, which also offers enabling another.
+     */
+    private void switchToNextKeyboard() {
+        boolean switched = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            switched = switchToNextInputMethod(false);
+        } else if (getWindow() != null && getWindow().getWindow() != null) {
+            switched = ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+                    .switchToNextInputMethod(getWindow().getWindow().getAttributes().token, false);
+        }
+        if (!switched) showInputMethodPicker();
     }
 
     private void onOptionKeyLongPressed() {
@@ -2032,6 +2379,8 @@ public class LatinIME extends InputMethodService implements
     // Implementation of KeyboardViewListener
 
     public void onKey(int primaryCode, int[] keyCodes, int x, int y) {
+        // droidtop: a key typed after a glide keeps the glided word (mytop-project/tracker#341).
+        mGlideWord = null;
         // droidtop patch (mytop-project/tracker#342): an open emoji search takes the keys.
         if (KeyboardCapture.offerKey(primaryCode)) {
             return;
@@ -2047,6 +2396,11 @@ public class LatinIME extends InputMethodService implements
         switch (primaryCode) {
         case Keyboard.KEYCODE_DELETE:
             if (processMultiKey(primaryCode)) {
+                break;
+            }
+            // droidtop (mytop-project/tracker#903 H6): a language's own engine takes Backspace while it composes.
+            if (mSession != null && mSession.onDelete()) {
+                mDeleteCount++;
                 break;
             }
             handleBackspace();
@@ -2097,6 +2451,22 @@ public class LatinIME extends InputMethodService implements
         case LatinKeyboardView.KEYCODE_OPTIONS_LONGPRESS:
             onOptionKeyLongPressed();
             break;
+        case SwitchKeyboard.CODE:
+            switchToNextKeyboard();
+            break;
+        case PadCalculator.EQUALS_CODE:
+            // droidtop (mytop-project/tracker#903 H12c): the number pad's "=".
+            typeCalculation();
+            break;
+        case PadCalculator.LETTERS_CODE:
+            // droidtop (mytop-project/tracker#903 H12c): the number pad's ABC, back to Normal; the keyboard builds itself again,
+            // once this key's own press is over.
+            mHandler.post(new Runnable() {
+                public void run() {
+                    KeyboardModes.choose(LatinIME.this, KeyboardModes.Mode.NORMAL);
+                }
+            });
+            break;
         case LatinKeyboardView.KEYCODE_COMPOSE:
             mComposeMode = !mComposeMode;
             mComposeBuffer.clear();
@@ -2108,10 +2478,8 @@ public class LatinIME extends InputMethodService implements
             toggleLanguage(false, false);
             break;
         case LatinKeyboardView.KEYCODE_VOICE:
-            if (mVoiceRecognitionTrigger.isInstalled()) {
-                mVoiceRecognitionTrigger.startVoiceRecognition();
-            }
-            //startListening(false /* was a button press, was not a swipe */);
+            // droidtop (mytop-project/tracker#343): dictation from the first voice provider that can.
+            VoiceInput.start(this);
             break;
         case 9 /* Tab */:
             if (processMultiKey(primaryCode)) {
@@ -2120,6 +2488,10 @@ public class LatinIME extends InputMethodService implements
             sendTab();
             break;
         case LatinKeyboardView.KEYCODE_ESCAPE:
+            // droidtop (mytop-project/tracker#903 H7a): a language's own engine cancels what it composes.
+            if (mSession != null && sessionNavigates(primaryCode, false)) {
+                break;
+            }
             if (processMultiKey(primaryCode)) {
                 break;
             }
@@ -2152,6 +2524,10 @@ public class LatinIME extends InputMethodService implements
         case LatinKeyboardView.KEYCODE_BREAK:
         case LatinKeyboardView.KEYCODE_NUM_LOCK:
         case LatinKeyboardView.KEYCODE_SCROLL_LOCK:
+            // droidtop (mytop-project/tracker#903 H7a): the arrows move about what a language's own engine composes.
+            if (mSession != null && sessionNavigates(primaryCode, isShiftMod())) {
+                break;
+            }
             if (processMultiKey(primaryCode)) {
                 break;
             }
@@ -2175,6 +2551,11 @@ public class LatinIME extends InputMethodService implements
                 mJustAddedAutoSpace = false;
             }
             RingCharBuffer.getInstance().push((char) primaryCode, x, y);
+            // droidtop (mytop-project/tracker#903 H6): a language's own engine first; what it leaves types as before.
+            if (mSession != null && sessionTakes(primaryCode, keyCodes)) {
+                mJustRevertedSeparator = null;
+                break;
+            }
             if (isWordSeparator(primaryCode)) {
                 handleSeparator(primaryCode);
             } else {
@@ -2197,7 +2578,7 @@ public class LatinIME extends InputMethodService implements
         InputConnection ic = getCurrentInputConnection();
         if (ic == null)
             return;
-        if (mPredicting && text.length() == 1) {
+        if (mLatin.predicting && text.length() == 1) {
             // If adding a single letter, treat it as a regular keystroke so
             // that completion works as expected.
             int c = text.charAt(0);
@@ -2209,7 +2590,7 @@ public class LatinIME extends InputMethodService implements
         }
         abortCorrection(false);
         ic.beginBatchEdit();
-        if (mPredicting) {
+        if (mLatin.predicting) {
             commitTyped(ic, true);
         }
         maybeRemovePreviousPeriod(text);
@@ -2235,14 +2616,13 @@ public class LatinIME extends InputMethodService implements
 
         ic.beginBatchEdit();
 
-        if (mPredicting) {
-            final int length = mComposing.length();
+        if (mLatin.predicting) {
+            final int length = mLatin.composing.length();
             if (length > 0) {
-                mComposing.delete(length - 1, length);
-                mWord.deleteLast();
-                ic.setComposingText(mComposing, 1);
-                if (mComposing.length() == 0) {
-                    mPredicting = false;
+                mLatin.onDelete();
+                ic.setComposingText(mLatin.composing, 1);
+                if (mLatin.composing.length() == 0) {
+                    mLatin.predicting = false;
                 }
                 postUpdateSuggestions();
             } else {
@@ -2399,36 +2779,35 @@ public class LatinIME extends InputMethodService implements
         if (isAlphabet(primaryCode) && isPredictionOn()
                 && !mModCtrl && !mModAlt && !mModMeta
                 && !isCursorTouchingWord()) {
-            if (!mPredicting) {
-                mPredicting = true;
-                mComposing.setLength(0);
+            if (!mLatin.predicting) {
+                mLatin.predicting = true;
+                mLatin.composing.setLength(0);
                 saveWordInHistory(mBestWord);
-                mWord.reset();
+                mLatin.word.reset();
             }
         }
 
         if (mModCtrl || mModAlt || mModMeta) {
-            commitTyped(getCurrentInputConnection(), true); // sets mPredicting=false
+            commitTyped(getCurrentInputConnection(), true); // sets mLatin.predicting=false
         }
 
-        if (mPredicting) {
+        if (mLatin.predicting) {
             if (isShiftCapsMode()
                     && mKeyboardSwitcher.isAlphabetMode()
-                    && mComposing.length() == 0) {
+                    && mLatin.composing.length() == 0) {
                 // Show suggestions with initial caps if starting out shifted,
                 // could be either auto-caps or manual shift.
-                mWord.setFirstCharCapitalized(true);
+                mLatin.word.setFirstCharCapitalized(true);
             }
-            mComposing.append((char) primaryCode);
-            mWord.add(primaryCode, keyCodes);
+            mLatin.onChar(primaryCode, keyCodes);
             InputConnection ic = getCurrentInputConnection();
             if (ic != null) {
                 // If it's the first letter, make note of auto-caps state
-                if (mWord.size() == 1) {
-                    mWord.setAutoCapitalized(getCursorCapsMode(ic,
+                if (mLatin.word.size() == 1) {
+                    mLatin.word.setAutoCapitalized(getCursorCapsMode(ic,
                             getCurrentInputEditorInfo()) != 0);
                 }
-                ic.setComposingText(mComposing, 1);
+                ic.setComposingText(mLatin.composing, 1);
             }
             postUpdateSuggestions();
         } else {
@@ -2455,7 +2834,7 @@ public class LatinIME extends InputMethodService implements
             ic.beginBatchEdit();
             abortCorrection(false);
         }
-        if (mPredicting) {
+        if (mLatin.predicting) {
             // In certain languages where single quote is a separator, it's
             // better
             // not to auto correct, but accept the typed word. For instance,
@@ -2503,7 +2882,7 @@ public class LatinIME extends InputMethodService implements
             doubleSpace();
         }
         if (pickedDefault) {
-            TextEntryState.backToAcceptedDefault(mWord.getTypedWord());
+            TextEntryState.backToAcceptedDefault(mLatin.word.getTypedWord());
         }
         updateShiftKeyState(getCurrentInputEditorInfo());
         if (ic != null) {
@@ -2524,8 +2903,8 @@ public class LatinIME extends InputMethodService implements
     }
 
     private void saveWordInHistory(CharSequence result) {
-        if (mWord.size() <= 1) {
-            mWord.reset();
+        if (mLatin.word.size() <= 1) {
+            mLatin.word.reset();
             return;
         }
         // Skip if result is null. It happens in some edge case.
@@ -2537,7 +2916,7 @@ public class LatinIME extends InputMethodService implements
         // CharSequence
         final String resultCopy = result.toString();
         TypedWordAlternatives entry = new TypedWordAlternatives(resultCopy,
-                new WordComposer(mWord));
+                new WordComposer(mLatin.word));
         mWordHistory.add(entry);
     }
 
@@ -2554,15 +2933,16 @@ public class LatinIME extends InputMethodService implements
     }
 
     private boolean isPredictionOn() {
-        return mPredictionOnForMode && isPredictionWanted();
+        // While a language's own engine types, Hacker's Latin path only passes keys through.
+        return mSession == null && mLatin.composes();
     }
 
     private boolean isPredictionWanted() {
-        return (mShowSuggestions || mSuggestionForceOn) && !suggestionsDisabled();
+        return mLatin.predictionWanted();
     }
 
     private boolean isCandidateStripVisible() {
-        return isPredictionOn();
+        return mEngine.wantsCandidateBar();
     }
 
     private void switchToKeyboardView() {
@@ -2597,6 +2977,8 @@ public class LatinIME extends InputMethodService implements
         }
 
         if (mCandidateView != null) {
+            // droidtop: other suggestions replace offline voice typing's line, so a tap on them is a pick again.
+            mShowingVoiceHint = false;
             mCandidateView.setSuggestions(suggestions, completions,
                     typedWordValid, haveMinimalSuggestion);
         }
@@ -2611,11 +2993,11 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         
-        if (!mPredicting) {
+        if (!mLatin.predicting) {
             setNextSuggestions();
             return;
         }
-        showSuggestions(mWord);
+        showWordSuggestions();
     }
 
     private List<CharSequence> getTypedSuggestions(WordComposer word) {
@@ -2632,54 +3014,26 @@ public class LatinIME extends InputMethodService implements
                 false);
     }
 
-    private void showSuggestions(WordComposer word) {
-        // long startTime = System.currentTimeMillis(); // TIME MEASUREMENT!
+    /** The word being typed: its suggestions from the Latin engine (mytop-project/tracker#903 H6), shown as Hacker's showed them. */
+    private void showWordSuggestions() {
         // TODO Maybe need better way of retrieving previous word
         CharSequence prevWord = EditingUtil.getPreviousWord(
                 getCurrentInputConnection(), mWordSeparators);
-        List<CharSequence> stringList = mSuggest.getSuggestions(
-                mKeyboardSwitcher.getInputView(), word, false, prevWord);
-        // long stopTime = System.currentTimeMillis(); // TIME MEASUREMENT!
-        // Log.d("LatinIME","Suggest Total Time - " + (stopTime - startTime));
-
-        int[] nextLettersFrequencies = mSuggest.getNextLettersFrequencies();
+        LatinEngine.Suggestions found = mLatin.suggest(mKeyboardSwitcher.getInputView(), prevWord,
+                mInputTypeNoAutoCorrect, TextEntryState.isCorrecting());
 
         ((LatinKeyboard) mKeyboardSwitcher.getInputView().getKeyboard())
-                .setPreferredLetters(nextLettersFrequencies);
+                .setPreferredLetters(found.nextLetters);
 
-        boolean correctionAvailable = !mInputTypeNoAutoCorrect
-                && mSuggest.hasMinimalCorrection();
-        // || mCorrectionMode == mSuggest.CORRECTION_FULL;
-        CharSequence typedWord = word.getTypedWord();
-        // If we're in basic correct
-        boolean typedWordValid = mSuggest.isValidWord(typedWord)
-                || (preferCapitalization() && mSuggest.isValidWord(typedWord
-                        .toString().toLowerCase()));
-        if (mCorrectionMode == Suggest.CORRECTION_FULL
-                || mCorrectionMode == Suggest.CORRECTION_FULL_BIGRAM) {
-            correctionAvailable |= typedWordValid;
-        }
-        // Don't auto-correct words with multiple capital letter
-        correctionAvailable &= !word.isMostlyCaps();
-        correctionAvailable &= !TextEntryState.isCorrecting();
-
-        showSuggestions(stringList, typedWord, typedWordValid,
-                correctionAvailable);
+        showSuggestions(found.words, found.typedWord, found.typedWordValid,
+                found.correctionAvailable);
     }
 
     private void showSuggestions(List<CharSequence> stringList,
             CharSequence typedWord, boolean typedWordValid,
             boolean correctionAvailable) {
         setSuggestions(stringList, false, typedWordValid, correctionAvailable);
-        if (stringList.size() > 0) {
-            if (correctionAvailable && !typedWordValid && stringList.size() > 1) {
-                mBestWord = stringList.get(1);
-            } else {
-                mBestWord = typedWord;
-            }
-        } else {
-            mBestWord = null;
-        }
+        mBestWord = LatinEngine.bestWord(stringList, typedWord, typedWordValid, correctionAvailable);
         setCandidatesViewShown(isCandidateStripVisible() || mCompletionOn);
     }
 
@@ -2690,7 +3044,7 @@ public class LatinIME extends InputMethodService implements
             updateSuggestions();
         }
         if (mBestWord != null && mBestWord.length() > 0) {
-            TextEntryState.acceptedDefault(mWord.getTypedWord(), mBestWord);
+            TextEntryState.acceptedDefault(mLatin.word.getTypedWord(), mBestWord);
             mJustAccepted = true;
             pickSuggestion(mBestWord, false);
             // Add the word to the auto dictionary if it's not a known word
@@ -2701,7 +3055,36 @@ public class LatinIME extends InputMethodService implements
         return false;
     }
 
+    /** droidtop: offline voice typing's line in the suggestion strip (mytop-project/tracker#343). */
+    void showVoiceHint(CharSequence text) {
+        if (mCandidateView == null) return;
+        setCandidatesViewShown(true);
+        java.util.ArrayList<CharSequence> line = new java.util.ArrayList<>();
+        line.add(text);
+        mCandidateView.setSuggestions(line, false, false, false);
+        mShowingVoiceHint = true;
+    }
+
+    void clearVoiceHint() {
+        if (!mShowingVoiceHint) return;
+        mShowingVoiceHint = false;
+        if (mCandidateView != null) mCandidateView.clear();
+    }
+
     public void pickSuggestionManually(int index, CharSequence suggestion) {
+        // droidtop: a tap on "Listening" stops offline voice typing (mytop-project/tracker#343).
+        if (mShowingVoiceHint) {
+            OfflineVoiceTyping.stop();
+            return;
+        }
+        // droidtop: one of a glide's other words replaces the word it typed (mytop-project/tracker#341).
+        if (replaceGlideWord(suggestion)) return;
+        // droidtop (mytop-project/tracker#903 H6): a candidate of a language's own engine.
+        if (mSession != null && mCandidateView != null && mCandidateView.isShowingEngineCandidates()) {
+            mSession.pick(index);
+            updateShiftKeyState(getCurrentInputEditorInfo());
+            return;
+        }
         List<CharSequence> suggestions = mCandidateView.getSuggestions();
 
         final boolean correcting = TextEntryState.isCorrecting();
@@ -2747,7 +3130,7 @@ public class LatinIME extends InputMethodService implements
         } else {
             addToBigramDictionary(suggestion, 1);
         }
-        TextEntryState.acceptedSuggestion(mComposing.toString(), suggestion);
+        TextEntryState.acceptedSuggestion(mLatin.composing.toString(), suggestion);
         // Follow it with a space
         if (mAutoSpace && !correcting) {
             sendSpace();
@@ -2781,7 +3164,60 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
-    private void rememberReplacedWord(CharSequence suggestion) {
+    /**
+     * droidtop: a glide's words (mytop-project/tracker#341), best first. The best is typed, after a space when it follows a
+     * word, with the shift state's capitals; the strip offers the rest, and picking one replaces it.
+     */
+    private void onGlideWords(java.util.List<String> words) {
+        if (words.isEmpty()) return;
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        ic.beginBatchEdit();
+        commitTyped(ic, true);
+        CharSequence before = ic.getTextBeforeCursor(1, 0);
+        if (before != null && before.length() > 0 && Character.isLetterOrDigit(before.charAt(0))) {
+            ic.commitText(" ", 1);
+        }
+        String word = glideCase(words.get(0));
+        ic.commitText(word, 1);
+        ic.endBatchEdit();
+        mGlideWord = word;
+        java.util.List<CharSequence> offered = new java.util.ArrayList<CharSequence>();
+        for (String w : words) offered.add(glideCase(w));
+        setSuggestions(offered, false, true, true);
+        updateShiftKeyState(getCurrentInputEditorInfo());
+    }
+
+    /** A glided word in the shift state's case: all capitals when locked, a capital first letter when shifted. */
+    private String glideCase(String word) {
+        // The keyboard's language decides the capitals, not the device's: a Turkish layout's "i" capitalises to
+        // the dotted capital, an English one's to "I" even on a Turkish device (mytop-project/tracker#772).
+        Locale locale = sKeyboardSettings.inputLocale;
+        int shift = getShiftState();
+        if (shift == Keyboard.SHIFT_LOCKED || shift == Keyboard.SHIFT_CAPS_LOCKED) return word.toUpperCase(locale);
+        if (shift == Keyboard.SHIFT_ON || shift == Keyboard.SHIFT_CAPS) {
+            return word.isEmpty() ? word : word.substring(0, 1).toUpperCase(locale) + word.substring(1);
+        }
+        return word;
+    }
+
+    /** When [suggestion] is picked right after a glide, it replaces the glided word; false otherwise. */
+    private boolean replaceGlideWord(CharSequence suggestion) {
+        String glided = mGlideWord;
+        if (glided == null) return false;
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return false;
+        CharSequence before = ic.getTextBeforeCursor(glided.length(), 0);
+        if (before == null || !glided.contentEquals(before)) {
+            mGlideWord = null;
+            return false;
+        }
+        ic.beginBatchEdit();
+        ic.deleteSurroundingText(glided.length(), 0);
+        ic.commitText(suggestion, 1);
+        ic.endBatchEdit();
+        mGlideWord = suggestion.toString();
+        return true;
     }
 
     /**
@@ -2802,11 +3238,10 @@ public class LatinIME extends InputMethodService implements
         }
         InputConnection ic = getCurrentInputConnection();
         if (ic != null) {
-            rememberReplacedWord(suggestion);
             ic.commitText(suggestion, 1);
         }
         saveWordInHistory(suggestion);
-        mPredicting = false;
+        mLatin.predicting = false;
         mCommittedLength = suggestion.length();
         ((LatinKeyboard) inputView.getKeyboard()).setPreferredLetters(null);
         // If we just corrected a word, then don't show punctuations
@@ -2859,9 +3294,9 @@ public class LatinIME extends InputMethodService implements
             }
             showCorrections(alternatives);
             if (foundWord != null) {
-                mWord = new WordComposer(foundWord);
+                mLatin.word = new WordComposer(foundWord);
             } else {
-                mWord.reset();
+                mLatin.word.reset();
             }
             return true;
         }
@@ -2876,7 +3311,7 @@ public class LatinIME extends InputMethodService implements
         InputConnection ic = getCurrentInputConnection();
         if (ic == null)
             return;
-        if (!mPredicting) {
+        if (!mLatin.predicting) {
             // Extract the selected or touching text
             EditingUtil.SelectedWord touching = EditingUtil
                     .getWordAtCursorOrSelection(ic, mLastSelectionStart,
@@ -2967,10 +3402,10 @@ public class LatinIME extends InputMethodService implements
     }
 
     public void revertLastWord(boolean deleteChar) {
-        final int length = mComposing.length();
-        if (!mPredicting && length > 0) {
+        final int length = mLatin.composing.length();
+        if (!mLatin.predicting && length > 0) {
             final InputConnection ic = getCurrentInputConnection();
-            mPredicting = true;
+            mLatin.predicting = true;
             mJustRevertedSeparator = ic.getTextBeforeCursor(1, 0);
             if (deleteChar)
                 ic.deleteSurroundingText(1, 0);
@@ -2982,7 +3417,7 @@ public class LatinIME extends InputMethodService implements
                 toDelete--;
             }
             ic.deleteSurroundingText(toDelete, 0);
-            ic.setComposingText(mComposing, 1);
+            ic.setComposingText(mLatin.composing, 1);
             TextEntryState.backspace();
             postUpdateSuggestions();
         } else {
@@ -3011,7 +3446,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     public boolean preferCapitalization() {
-        return mWord.isFirstCharCapitalized();
+        return mLatin.word.isFirstCharCapitalized();
     }
 
     void toggleLanguage(boolean reset, boolean next) {
@@ -3144,8 +3579,8 @@ public class LatinIME extends InputMethodService implements
             mVolUpAction = sharedPreferences.getString(PREF_VOL_UP, res.getString(R.string.default_vol_up));
         } else if (PREF_VOL_DOWN.equals(key)) {
             mVolDownAction = sharedPreferences.getString(PREF_VOL_DOWN, res.getString(R.string.default_vol_down));
-        } else if (PREF_VIBRATE_LEN.equals(key)) {
-            mVibrateLen = getPrefInt(sharedPreferences, PREF_VIBRATE_LEN, getResources().getString(R.string.vibrate_duration_ms));
+        } else if (KeyHaptics.PREF.equals(key) || KeyHaptics.LEN_PREF.equals(key)) {
+            mHaptics.load(sharedPreferences);
         }
 
         updateKeyboardOptions();
@@ -3232,7 +3667,7 @@ public class LatinIME extends InputMethodService implements
     public void onPress(int primaryCode) {
         InputConnection ic = getCurrentInputConnection();
         if (mKeyboardSwitcher.isVibrateAndSoundFeedbackRequired()) {
-            vibrate();
+            mHaptics.play(primaryCode);
             playKeyClick(primaryCode);
         }
         final boolean distinctMultiTouch = mKeyboardSwitcher
@@ -3411,26 +3846,6 @@ public class LatinIME extends InputMethodService implements
         }
     }
 
-    private void vibrate() {
-        if (!mVibrateOn) {
-            return;
-        }
-        vibrate(mVibrateLen);
-    }
-
-    void vibrate(int len) {
-        Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-        if (v != null) {
-            v.vibrate(len);
-            return;
-        }
-
-        if (mKeyboardSwitcher.getInputView() != null) {
-            mKeyboardSwitcher.getInputView().performHapticFeedback(
-                    HapticFeedbackConstants.KEYBOARD_TAP,
-                    HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
-        }
-    }
     
     /* package */void promoteToUserDictionary(String word, int frequency) {
         if (mUserDictionary.isValidWord(word))
@@ -3439,7 +3854,7 @@ public class LatinIME extends InputMethodService implements
     }
 
     /* package */WordComposer getCurrentWord() {
-        return mWord;
+        return mLatin.word;
     }
 
     /* package */boolean getPopupOn() {
@@ -3490,8 +3905,7 @@ public class LatinIME extends InputMethodService implements
         // Get the settings preferences
         SharedPreferences sp = PreferenceManager
                 .getDefaultSharedPreferences(this);
-        mVibrateOn = sp.getBoolean(PREF_VIBRATE_ON, false);
-        mVibrateLen = getPrefInt(sp, PREF_VIBRATE_LEN, getResources().getString(R.string.vibrate_duration_ms));
+        mHaptics.load(sp);
         mSoundOn = sp.getBoolean(PREF_SOUND_ON, false);
         mPopupOn = sp.getBoolean(PREF_POPUP_ON, mResources
                 .getBoolean(R.bool.default_popup_preview));
@@ -3610,16 +4024,16 @@ public class LatinIME extends InputMethodService implements
         final Printer p = new PrintWriterPrinter(fout);
         p.println("LatinIME state :");
         p.println("  Keyboard mode = " + mKeyboardSwitcher.getKeyboardMode());
-        p.println("  mComposing=" + mComposing.toString());
+        p.println("  mComposing=" + mLatin.composing.toString());
         p.println("  mPredictionOnForMode=" + mPredictionOnForMode);
         p.println("  mCorrectionMode=" + mCorrectionMode);
-        p.println("  mPredicting=" + mPredicting);
+        p.println("  mPredicting=" + mLatin.predicting);
         p.println("  mAutoCorrectOn=" + mAutoCorrectOn);
         p.println("  mAutoSpace=" + mAutoSpace);
         p.println("  mCompletionOn=" + mCompletionOn);
         p.println("  TextEntryState.state=" + TextEntryState.getState());
         p.println("  mSoundOn=" + mSoundOn);
-        p.println("  mVibrateOn=" + mVibrateOn);
+        p.println("  vibrationStrength=" + mHaptics.getStrength() + " customMs=" + mHaptics.getCustomMs());
         p.println("  mPopupOn=" + mPopupOn);
     }
 

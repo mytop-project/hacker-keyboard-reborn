@@ -67,7 +67,18 @@ public final class GlobalKeyboardSettings {
     public boolean spaceDrag = true;
     //
     // Read by LatinKeyboard (droidtop, mytop-project/tracker#342)
-    public KeyboardForm.Form form = KeyboardForm.FULL;
+    /** The key grid shape chosen for portrait (and, before H1, for both); blank when unset. */
+    public String formChoice = "";
+    /** The key grid shape chosen for landscape (mytop-project/tracker#903 H1); blank when unset. */
+    public String formLandscapeChoice = "";
+
+    /**
+     * The key grid's form for the screen [context] draws on: the shape setting's ({@link KeyboardForm#forScreen}), or,
+     * in the input method, its mode's ({@link KeyboardModes#formFor}, mytop-project/tracker#903 H12c).
+     */
+    public KeyboardForm.Form formFor(android.content.Context context) {
+        return KeyboardModes.formFor(context, KeyboardForm.forScreen(formChoice, formLandscapeChoice, context));
+    }
     
     /* Updated by LatinIME */
     //
@@ -146,11 +157,28 @@ public final class GlobalKeyboardSettings {
             public int getFlags() { return FLAG_PREF_NONE; }
         });
 
+        // Blank by default, so an unset choice falls to KeyboardForm.choose's orientation default (#903 H1).
         addStringPref(KeyboardForm.PREF, new StringPref() {
-            public void set(String val) { form = KeyboardForm.of(val); }
-            public String getDefault() { return KeyboardForm.FULL.getId(); }
+            public void set(String val) { formChoice = val == null ? "" : val; }
+            public String getDefault() { return ""; }
             public int getFlags() { return FLAG_PREF_RESET_KEYBOARDS | FLAG_PREF_RECREATE_INPUT_VIEW; }
         });
+
+        addStringPref(KeyboardForm.PREF_LANDSCAPE, new StringPref() {
+            public void set(String val) { formLandscapeChoice = val == null ? "" : val; }
+            public String getDefault() { return ""; }
+            public int getFlags() { return FLAG_PREF_RESET_KEYBOARDS | FLAG_PREF_RECREATE_INPUT_VIEW; }
+        });
+
+        // The input method's modes (mytop-project/tracker#903 H12c), each orientation's: a change builds the keys and the view
+        // again. The floating place only moves the frame, so it is not here.
+        for (String modeKey : KeyboardModes.REBUILDING_KEYS) {
+            addStringPref(modeKey, new StringPref() {
+                public void set(String val) { }
+                public String getDefault() { return ""; }
+                public int getFlags() { return FLAG_PREF_RESET_KEYBOARDS | FLAG_PREF_RECREATE_INPUT_VIEW; }
+            });
+        }
 
         addBooleanPref("pref_space_drag", new BooleanPref() {
             public void set(boolean val) { spaceDrag = val; }

@@ -1,0 +1,186 @@
+package org.pocketworkstation.pckeyboard
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.preference.PreferenceCategory
+import android.preference.PreferenceGroup
+import org.xmlpull.v1.XmlPullParser
+
+/**
+ * Pro mode (mytop-project/tracker#337; docs/SPEC.md 6a). The owner, 2026-10-08: "It is extra important that we keep Hacker
+ * Keyboard flexibility, though we can probably put it behind a pro mode toggle?"
+ *
+ * With pro mode off the settings screen is short: size, layout and theme, languages, sound and vibration, capitals,
+ * suggestions with the dictionaries, glide typing, offline voice typing and droidtop's editing helpers ([SIMPLE]). With
+ * it on it is Hacker's Keyboard's whole tree. Nothing is removed: a hidden option keeps its value and keeps working,
+ * and turning pro mode off changes no value. An install
+ * that already has keyboard settings starts in pro mode, so nobody who set the keyboard up loses sight of an option.
+ * "Reset to modern defaults" asks first, then clears every option the settings screens declare back to its default,
+ * keeping the person's own content ([KEPT_ON_RESET]).
+ */
+object KeyboardProMode {
+    const val KEY = "pref_pro_mode"
+    const val RESET_KEY = "pref_reset_modern"
+
+    /** What the short screen shows, by preference key; a category stays while anything in it does. */
+    val SIMPLE: Set<String> = setOf(
+        KEY, RESET_KEY, PRESET_KEY,
+        "settings_height_portrait", "settings_height_landscape",
+        "pref_keyboard_mode_portrait", "pref_keyboard_mode_landscape", "pref_screen_view",
+        "pref_screen_languages",
+        "auto_cap", "pref_screen_feedback",
+        "show_suggestions", "pref_dictionaries", "pref_glide", "pref_offline_voice",
+        "pref_tools_strip", "pref_keyboard_form", "pref_emoji", "pref_inline_autofill", "pref_incognito",
+        "pref_clipboard_history", "pref_clipboard_keep", "pref_space_drag", "pref_gif_folders", "pref_keyboard_view_mode",
+        "pref_keyboard_view_mode_landscape",
+    )
+
+    /** Kept by a reset: the mode itself and what the person wrote or picked (their macros, their GIF folders). */
+    val KEPT_ON_RESET: Set<String> = setOf(KEY, "pref_macros", "pref_gif_folders")
+
+    /** The settings screens whose options a reset clears. */
+    private val SCREENS = intArrayOf(R.xml.prefs, R.xml.prefs_view, R.xml.prefs_actions, R.xml.prefs_feedback)
+
+    /** Whether the short screen shows [key]: one in [SIMPLE], or a language engine's own row (#903 H7c). Pure. */
+    @JvmStatic
+    fun keepsInSimple(key: String?): Boolean = key != null && (key in SIMPLE || key.startsWith(InputEngines.KEY_PREFIX))
+
+    /** Pro mode for an install seen for the first time: on when the keyboard already holds settings. Pure. */
+    @JvmStatic
+    fun initialFor(storedKeys: Set<String>): Boolean = storedKeys.any { it != KEY }
+
+    /** What a reset clears from what the screens declare. Pure. */
+    @JvmStatic
+    fun resetKeys(declared: Set<String>): Set<String> = declared - KEPT_ON_RESET
+
+    /** Whether pro mode is on, deciding it once for an install that has never had it. */
+    @JvmStatic
+    fun isPro(prefs: SharedPreferences): Boolean {
+        if (!prefs.contains(KEY)) {
+            val pro = initialFor(prefs.all.keys)
+            prefs.edit().putBoolean(KEY, pro).apply()
+            return pro
+        }
+        return prefs.getBoolean(KEY, false)
+    }
+
+    /** Hides what the short screen leaves out of [group], and any category left empty. */
+    @JvmStatic
+    fun applySimple(group: PreferenceGroup) {
+        for (i in group.preferenceCount - 1 downTo 0) {
+            val preference = group.getPreference(i)
+            if (preference is PreferenceCategory) {
+                applySimple(preference)
+                if (preference.preferenceCount == 0) group.removePreference(preference)
+            } else if (!keepsInSimple(preference.key)) {
+                group.removePreference(preference)
+            }
+        }
+    }
+
+    /** Every option key the settings screens declare. Reads resources. */
+    @JvmStatic
+    fun declaredKeys(context: Context): Set<String> = buildSet {
+        for (screen in SCREENS) {
+            context.resources.getXml(screen).use { parser ->
+                while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                    if (parser.eventType != XmlPullParser.START_TAG) continue
+                    parser.getAttributeValue(ANDROID_NS, "key")?.let(::add)
+                }
+            }
+        }
+    }
+
+    /** Clears every declared option but [KEPT_ON_RESET]; each falls back to its default. */
+    @JvmStatic
+    fun reset(context: Context, prefs: SharedPreferences) {
+        val editor = prefs.edit()
+        resetKeys(declaredKeys(context)).forEach { editor.remove(it) }
+        editor.apply()
+    }
+
+    /**
+     * The three starting points #337 names, each a set of ordinary option values (shown and changeable afterwards;
+     * nothing else is touched). Values are what the options store: list choices and heights as strings, switches as
+     * booleans.
+     */
+    enum class Preset(val label: String, val about: String, val values: Map<String, Any>) {
+        HANDHELD(
+            "Handheld",
+            "Four rows for thumbs in both orientations, a taller keyboard held sideways, capitals and suggestions on",
+            mapOf(
+                "pref_keyboard_mode_portrait" to "0",
+                "pref_keyboard_mode_landscape" to "0",
+                "settings_height_landscape" to "45",
+                "auto_cap" to true,
+                "show_suggestions" to true,
+                "suggestions_in_landscape" to true,
+            ),
+        ),
+        TERMINAL(
+            "Terminal",
+            "The full five rows with Esc, Ctrl, Alt and the arrows in both orientations; no capitals, suggestions, corrections or glide typing",
+            mapOf(
+                "pref_keyboard_mode_portrait" to "2",
+                "pref_keyboard_mode_landscape" to "2",
+                "auto_cap" to false,
+                "show_suggestions" to false,
+                "auto_complete" to false,
+                "quick_fixes" to false,
+                "suggestions_in_landscape" to false,
+                "pref_glide" to false,
+                "connectbot_tab_hack" to true,
+            ),
+        ),
+        CLASSIC_HACKER(
+            "Classic Hacker",
+            "Hacker's Keyboard as it shipped: every option back to its default (macros and languages stay) and its Ice Cream Sandwich theme",
+            mapOf("pref_keyboard_layout" to "0"),
+        ),
+    }
+
+    const val PRESET_KEY = "pref_keyboard_preset"
+
+    /** The layout first setup asked for (mytop-project/tracker#903): [AUTOMATIC] or a [Preset] name; unset before it asks. */
+    const val LAYOUT_CHOICE_KEY = "pref_keyboard_layout_choice"
+    const val AUTOMATIC = "automatic"
+
+    /** Every option a [Preset] writes: what [automatic] clears so the screen-derived defaults apply again. Pure. */
+    @JvmStatic
+    fun presetKeys(): Set<String> = Preset.entries.flatMap { it.values.keys }.toSet()
+
+    /**
+     * Automatic (mytop-project/tracker#903, the owner: "the default layout is derived from screen size and dpi"): every option
+     * a preset sets goes back to its default, so the keyboard's own rules choose (four rows held upright, all five held
+     * sideways, split on a handheld, `KeyboardForm`). Nothing else changes.
+     */
+    @JvmStatic
+    fun automatic(prefs: SharedPreferences) {
+        val editor = prefs.edit()
+        presetKeys().forEach { editor.remove(it) }
+        editor.putString(LAYOUT_CHOICE_KEY, AUTOMATIC).apply()
+    }
+
+    /** [preset] for first setup's layout question: [apply], and the answer kept so the step shows it chosen. */
+    @JvmStatic
+    fun choose(context: Context, prefs: SharedPreferences, preset: Preset) {
+        apply(context, prefs, preset)
+        prefs.edit().putString(LAYOUT_CHOICE_KEY, preset.name).apply()
+    }
+
+    /** Applies [preset]: Classic Hacker starts from every default, the others change only their own options. */
+    @JvmStatic
+    fun apply(context: Context, prefs: SharedPreferences, preset: Preset) {
+        if (preset == Preset.CLASSIC_HACKER) reset(context, prefs)
+        val editor = prefs.edit()
+        for ((key, value) in preset.values) {
+            when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                else -> editor.putString(key, value.toString())
+            }
+        }
+        editor.apply()
+    }
+
+    private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
+}

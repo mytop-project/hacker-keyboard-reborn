@@ -196,6 +196,21 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
     private int mShadowColor;
     private float mShadowRadius;
     private Drawable mKeyBackground;
+    /** droidtop patch (mytop-project/tracker#903 H2): the colours keys are drawn as plates in, or null for the theme's drawing. */
+    private KeyboardColors mPlates;
+    private final Paint mPlatePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.RectF mPlateRect = new android.graphics.RectF();
+    // droidtop patch (mytop-project/tracker#903 H12a): the pressed key's scale and tint, eased (KeyPressMotion, KeyMotion).
+    private final KeyPressMotion mPressMotion = new KeyPressMotion();
+    // The pressed tint of the key being drawn, 0 to 1, for drawPlate.
+    private float mDrawTint;
+    // Label sizes follow the keys' median size, worked out once per set of keys rather than on every frame.
+    private Key[] mMedianKeysFor;
+    // The icon colour filters, kept while their colours stay the same rather than made on every frame.
+    private PorterDuffColorFilter mIconFilter;
+    private int mIconFilterColor;
+    private PorterDuffColorFilter mShadowFilter;
+    private int mShadowFilterColor;
     private int mBackgroundAlpha;
     private float mBackgroundDimAmount;
     private float mKeyHysteresisDistance;
@@ -297,6 +312,26 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
     private final UIHandler mHandler = new UIHandler();
 
+    // droidtop patch (mytop-project/tracker#903 H12a): the key preview and the long-press popup grow out of their key and
+    // shrink back into it (PopupMotion); a popup shrinking away is "leaving" and no longer counts as shown.
+    private static final float POPUP_LEAVE_SCALE = 0.7f;
+    private boolean mPreviewLeaving;
+    private boolean mMiniKeyboardLeaving;
+    private final Runnable mDismissPreview = new Runnable() {
+        @Override
+        public void run() {
+            mPreviewLeaving = false;
+            mPreviewPopup.dismiss();
+        }
+    };
+    private final Runnable mDismissMiniKeyboard = new Runnable() {
+        @Override
+        public void run() {
+            mMiniKeyboardLeaving = false;
+            mMiniKeyboardPopup.dismiss();
+        }
+    };
+
     class UIHandler extends Handler {
         private static final int MSG_POPUP_PREVIEW = 1;
         private static final int MSG_DISMISS_PREVIEW = 2;
@@ -312,7 +347,9 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
                     showKey(msg.arg1, (PointerTracker)msg.obj);
                     break;
                 case MSG_DISMISS_PREVIEW:
-                    mPreviewPopup.dismiss();
+                    // droidtop patch (#903 H12a): shrinks back into its key, then goes.
+                    mPreviewLeaving = true;
+                    PopupMotion.shrink(mPreviewText, POPUP_LEAVE_SCALE, mDismissPreview);
                     break;
                 case MSG_REPEAT_KEY: {
                     final PointerTracker tracker = (PointerTracker)msg.obj;
@@ -434,6 +471,11 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
         public void remove(PointerTracker tracker) {
             mQueue.remove(tracker);
+        }
+
+        /** droidtop: forgets every pointer without releasing it (a glide took the touch, mytop-project/tracker#341). */
+        public void clear() {
+            mQueue.clear();
         }
 
         public boolean isInSlidingKeyInput() {
@@ -668,17 +710,23 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         // Disable correctionX and correctionY, it doesn't seem to work as intended.
         // mKeys = mKeyDetector.setKeyboard(keyboard, -getPaddingLeft(),-getPaddingTop() + mVerticalCorrection);
         mKeys = mKeyDetector.setKeyboard(keyboard, 0, 0);
+        mPressMotion.clear();
         mKeyboardVerticalGap = (int)getResources().getDimension(R.dimen.key_bottom_gap);
         for (PointerTracker tracker : mPointerTrackers) {
             tracker.setKeyboard(mKeys, mKeyHysteresisDistance);
         }
         mLabelScale = LatinIME.sKeyboardSettings.labelScalePref;
+        // droidtop patch (mytop-project/tracker#903 H2): HKR's modern plates, or the theme's drawing (KeyPlates.colorsFor).
+        mPlates = KeyPlates.colorsFor(getContext());
+        if (mPlates != null) setBackgroundColor(mPlates.getGround());
         //if (keyboard.mLayoutRows >= 4) mLabelScale *= 5.0f / keyboard.mLayoutRows;
         requestLayout();
         // Hint to reallocate the buffer if the size changed
         mKeyboardChanged = true;
         invalidateAllKeys();
         computeProximityThreshold(keyboard);
+        // droidtop: glide typing works out its paths for this keyboard's letter keys (mytop-project/tracker#341).
+        if (mGlide != null) mGlide.prepare(keyboard);
         mMiniKeyboardCacheMain.clear();
         mMiniKeyboardCacheShift.clear();
         mMiniKeyboardCacheCaps.clear();
@@ -793,7 +841,10 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
     public void setPopupOffset(int x, int y) {
         mPopupPreviewOffsetX = x;
         mPopupPreviewOffsetY = y;
-        if (mPreviewPopup != null) mPreviewPopup.dismiss();
+        if (mPreviewPopup != null) {
+            mPreviewLeaving = false;
+            mPreviewPopup.dismiss();
+        }
     }
 
     /**
@@ -856,6 +907,7 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         super.onSizeChanged(w, h, oldw, oldh);
         Log.i(TAG, "onSizeChanged, w=" + w + ", h=" + h);
         mViewWidth = w;
+        mMedianKeysFor = null;
         // Release the buffer, if any and it will be reallocated on the next draw
         mBuffer = null;
     }
@@ -869,6 +921,107 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
             onBufferDraw(canvas);
         }
         if (mBuffer != null) canvas.drawBitmap(mBuffer, 0, 0, null);
+        // droidtop: a glide's trail over the keys (mytop-project/tracker#341).
+        if (mGlide != null) mGlide.drawTrail(canvas, getPaddingLeft(), getPaddingTop(), mGlideTrailPaint);
+        // droidtop: the pad's focus ring (mytop-project/tracker#338), over the keys, only while a pad drives.
+        if (mPadFocus != null) {
+            Key k = mPadFocus;
+            float inset = mPadRingPaint.getStrokeWidth() / 2f;
+            float left = k.x + getPaddingLeft() + inset;
+            float top = k.y + getPaddingTop() + inset;
+            float radius = 6f * getResources().getDisplayMetrics().density;
+            canvas.drawRoundRect(left, top, left + k.width - 2 * inset, top + k.height - 2 * inset, radius, radius, mPadRingPaint);
+        }
+    }
+
+    // droidtop: the key the pad's focus ring is on, or null (mytop-project/tracker#338, PadKeys).
+    private Key mPadFocus;
+    private final Paint mPadRingPaint = padRingPaint(getResources().getDisplayMetrics().density);
+
+    // droidtop: glide typing (mytop-project/tracker#341). Null while it is off; the IME sets it.
+    private GlideTyping mGlide;
+    private final Paint mGlideTrailPaint = GlideTyping.trailPaint(getContext(), 6 * getResources().getDisplayMetrics().density);
+
+    public void setGlide(GlideTyping glide) {
+        if (mGlide == glide) return;
+        if (mGlide != null) mGlide.cancel();
+        mGlide = glide;
+        if (glide != null && mKeyboard != null) glide.prepare(mKeyboard);
+        invalidate();
+    }
+
+    /** Whether the touch at keyboard coordinates (x, y) is on a letter key, where a glide may start. */
+    private boolean letterAt(int x, int y) {
+        if (mKeys == null) return false;
+        for (Key k : mKeys) {
+            if (k.isInside(x, y)) return k.codes != null && k.codes.length > 0 && Character.isLetter(k.codes[0]);
+        }
+        return false;
+    }
+
+    /**
+     * A single finger's touch, offered to glide typing first. True when the glide takes it: from the move that makes
+     * the touch a glide, the ordinary key press is cancelled and the keys see nothing more of this touch.
+     */
+    private boolean offerToGlide(MotionEvent me, int action) {
+        if (mGlide == null || mMiniKeyboardVisible) return false;
+        if (me.getPointerCount() > 1) {
+            boolean was = mGlide.getGliding();
+            mGlide.cancel();
+            if (was) invalidate();
+            return was;
+        }
+        final int gx = (int) me.getX() - getPaddingLeft();
+        final int gy = (int) me.getY() - getPaddingTop();
+        switch (action) {
+        case MotionEvent.ACTION_DOWN:
+            mGlide.down(gx, gy, letterAt(gx, gy));
+            return false;
+        case MotionEvent.ACTION_MOVE: {
+            final boolean wasGliding = mGlide.getGliding();
+            if (!mGlide.move(gx, gy)) return false;
+            if (!wasGliding) {
+                // The touch is a glide now: the key it started on is not pressed.
+                for (PointerTracker t : mPointerTrackers) t.onCancelEvent(gx, gy, me.getEventTime());
+                mPointerQueue.clear();
+                dismissKeyPreview();
+                mHandler.cancelKeyTimers();
+            }
+            invalidate();
+            return true;
+        }
+        case MotionEvent.ACTION_UP:
+            if (mGlide.up(gx, gy)) {
+                invalidate();
+                return true;
+            }
+            return false;
+        case MotionEvent.ACTION_CANCEL:
+            mGlide.cancel();
+            invalidate();
+            return false;
+        default:
+            return mGlide.getGliding();
+        }
+    }
+
+    private static Paint padRingPaint(float density) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(3f * density);
+        // droidtop's focus accent, the azure fallback (docs/SPEC.md "Product rules", ES-DE accent).
+        paint.setColor(0xFF3BB5FF);
+        return paint;
+    }
+
+    public void setPadFocus(Key key) {
+        if (mPadFocus == key) return;
+        mPadFocus = key;
+        invalidate();
+    }
+
+    public Key getPadFocus() {
+        return mPadFocus;
     }
     
     private void drawDeadKeyLabel(Canvas canvas, String hint, int x, float baseline, Paint paint) {
@@ -891,10 +1044,42 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         }
     }
 
+    /**
+     * droidtop patch (mytop-project/tracker#903 H2): one key as a flat rounded plate, in the canvas already moved to the
+     * key's corner. The colour is {@link KeyPlates#plateColor}: function keys a shade apart, a latched modifier lit, a
+     * pressed key in the focused shade.
+     */
+    private void drawPlate(Canvas canvas, Key key) {
+        final float density = getResources().getDisplayMetrics().density;
+        final boolean functional = KeyPlates.functional(key.codes, key.label, key.icon != null, key.modifier, key.sticky);
+        // Pressed: the focused shade at once; released, it fades back to the resting colour (#903 H12a).
+        final int rest = KeyPlates.plateColor(mPlates, functional, false, key.on);
+        final float tint = mDrawTint;
+        final int color = tint >= 1f ? mPlates.getKeyFocused()
+                : tint <= 0f ? rest : KeyPlates.blend(rest, mPlates.getKeyFocused(), tint);
+        mPlateRect.set(0, 0, key.width, key.height);
+        KeyPlates.draw(canvas, mPlateRect, color, density, mPlatePaint);
+    }
+
+    /** The plate colours this view draws in, or null for a classic theme's own drawing (#903 H12b). */
+    KeyboardColors getPlates() {
+        return mPlates;
+    }
+
+    /** The icon colour filter for [color], made again only when the colour changes. */
+    private PorterDuffColorFilter iconFilter(int color) {
+        if (mIconFilter == null || mIconFilterColor != color) {
+            mIconFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_ATOP);
+            mIconFilterColor = color;
+        }
+        return mIconFilter;
+    }
+
     private void onBufferDraw(Canvas canvas) {
         //Log.i(TAG, "onBufferDraw called");
         if (/*mBuffer == null ||*/ mKeyboardChanged) {
             mKeyboard.setKeyboardWidth(mViewWidth);
+            mMedianKeysFor = null; // the keys were resized in place
 //            if (mBuffer == null || mKeyboardChanged &&
 //                    (mBuffer.getWidth() != getWidth() || mBuffer.getHeight() != getHeight())) {
 //                // Make sure our bitmap is at least 1x1
@@ -915,7 +1100,7 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
         final Paint paint = mPaint;
         final Paint paintHint = mPaintHint;
-        paintHint.setColor(mKeyHintColor);
+        paintHint.setColor(mPlates != null ? mPlates.getMuted() : mKeyHintColor);
         final Drawable keyBackground = mKeyBackground;
         final Rect clipRegion = mClipRegion;
         final Rect padding = mPadding;
@@ -926,14 +1111,18 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
         ColorFilter iconColorFilter = null;
         ColorFilter shadowColorFilter = null;
-        if (mInvertSymbols) {
+        if (mPlates != null) {
+            // Plates: icons in the label colour, no shadow (HKR's flat look, #903 H2).
+            iconColorFilter = iconFilter(mPlates.getText());
+        } else if (mInvertSymbols) {
             iconColorFilter = mInvertingColorFilter;
         } else if (mRecolorSymbols) {
-            // TODO: cache these?
-            iconColorFilter = new PorterDuffColorFilter(
-                    mKeyTextColor, PorterDuff.Mode.SRC_ATOP);
-            shadowColorFilter = new PorterDuffColorFilter(
-                    mShadowColor, PorterDuff.Mode.SRC_ATOP);
+            iconColorFilter = iconFilter(mKeyTextColor);
+            if (mShadowFilter == null || mShadowFilterColor != mShadowColor) {
+                mShadowFilter = new PorterDuffColorFilter(mShadowColor, PorterDuff.Mode.SRC_ATOP);
+                mShadowFilterColor = mShadowColor;
+            }
+            shadowColorFilter = mShadowFilter;
         }
 
         boolean drawSingleKey = false;
@@ -950,21 +1139,29 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         //canvas.drawColor(0x00000000, PorterDuff.Mode.CLEAR);
         final int keyCount = keys.length;
 
-        // Scale the key labels based on the median key size.
-        List<Integer> keyWidths = new ArrayList<Integer>();
-        List<Integer> keyHeights = new ArrayList<Integer>();
-        for (int i = 0; i < keyCount; i++) {
-            final Key key = keys[i];
-            keyWidths.add(key.width);
-            keyHeights.add(key.height);
+        // Scale the key labels based on the median key size: once per set of keys (droidtop, #903 H12a: a moving
+        // key redraws every frame, and this sorted two boxed lists each time).
+        if (mMedianKeysFor != keys) {
+            mMedianKeysFor = keys;
+            List<Integer> keyWidths = new ArrayList<Integer>();
+            List<Integer> keyHeights = new ArrayList<Integer>();
+            for (int i = 0; i < keyCount; i++) {
+                final Key key = keys[i];
+                keyWidths.add(key.width);
+                keyHeights.add(key.height);
+            }
+            Collections.sort(keyWidths);
+            Collections.sort(keyHeights);
+            int medianKeyWidth = keyWidths.get(keyCount / 2);
+            int medianKeyHeight = keyHeights.get(keyCount / 2);
+            // Use 60% of the smaller of width or height. This is kind of arbitrary.
+            mKeyTextSize = Math.min(medianKeyHeight * 6 / 10, medianKeyWidth * 6 / 10);
+            mLabelTextSize = mKeyTextSize * 3 / 4;
         }
-        Collections.sort(keyWidths);
-        Collections.sort(keyHeights);
-        int medianKeyWidth = keyWidths.get(keyCount / 2);
-        int medianKeyHeight = keyHeights.get(keyCount / 2);
-        // Use 60% of the smaller of width or height. This is kind of arbitrary.
-        mKeyTextSize = Math.min(medianKeyHeight * 6 / 10, medianKeyWidth * 6 / 10);
-        mLabelTextSize = mKeyTextSize * 3 / 4;
+
+        // droidtop patch (mytop-project/tracker#903 H12a): one clock and one duration scale for the whole frame.
+        final long now = android.view.animation.AnimationUtils.currentAnimationTimeMillis();
+        final float motion = KeyboardMotion.getScale();
 
         int keysDrawn = 0;
         for (int i = 0; i < keyCount; i++) {
@@ -980,7 +1177,10 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
                 continue;
             }
             keysDrawn++;
-            paint.setColor(key.isCursor ? mKeyCursorColor : mKeyTextColor);
+            mPressMotion.track(key, now, motion);
+            final float keyScale = mPressMotion.scaleOf(key, now, motion);
+            mDrawTint = mPressMotion.tintOf(key, now, motion);
+            paint.setColor(key.isCursor ? mKeyCursorColor : (mPlates != null ? mPlates.getText() : mKeyTextColor));
 
             int[] drawableState = key.getCurrentDrawableState();
             keyBackground.setState(drawableState);
@@ -1000,15 +1200,25 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
                 }
             }
             canvas.translate(key.x + kbdPaddingLeft, key.y + kbdPaddingTop);
-            if (yscale != 1.0f) {
+            // A pressed key shrinks toward its centre, plate, label and icon together (#903 H12a).
+            final boolean scaledKey = keyScale != 1f;
+            if (scaledKey) {
                 canvas.save();
-                canvas.scale(1.0f, yscale);
+                canvas.scale(keyScale, keyScale, key.width / 2f, key.height / 2f);
             }
-            if (mBackgroundAlpha != 255) {
-                keyBackground.setAlpha(mBackgroundAlpha);
+            if (mPlates != null) {
+                drawPlate(canvas, key);
+            } else {
+                if (yscale != 1.0f) {
+                    canvas.save();
+                    canvas.scale(1.0f, yscale);
+                }
+                if (mBackgroundAlpha != 255) {
+                    keyBackground.setAlpha(mBackgroundAlpha);
+                }
+                keyBackground.draw(canvas);
+                if (yscale != 1.0f)  canvas.restore();
             }
-            keyBackground.draw(canvas);
-            if (yscale != 1.0f)  canvas.restore();
 
             boolean shouldDrawIcon = true;
             if (label != null) {
@@ -1027,8 +1237,8 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
                 final int labelHeight = getLabelHeight(paint, labelSize);
 
-                // Draw a drop shadow for the text
-                paint.setShadowLayer(mShadowRadius, 0, 0, mShadowColor);
+                // Draw a drop shadow for the text (none on HKR's flat plates, #903 H2)
+                paint.setShadowLayer(mPlates != null ? 0 : mShadowRadius, 0, 0, mShadowColor);
 
                 // Draw hint label (if present) behind the main key
                 String hint = key.getHintLabel(showHints7Bit(), showHintsAll());
@@ -1139,8 +1349,11 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
                 }
                 canvas.translate(-drawableX, -drawableY);
             }
+            if (scaledKey) canvas.restore();
             canvas.translate(-key.x - kbdPaddingLeft, -key.y - kbdPaddingTop);
         }
+        // Another frame for every key still easing in or out.
+        mPressMotion.schedule(this, now, motion, kbdPaddingLeft, kbdPaddingTop);
         //Log.i(TAG, "keysDrawn=" + keysDrawn);
         mInvalidatedKey = null;
         // Overlay a dark rectangle to dim the keyboard
@@ -1270,13 +1483,24 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
             popupPreviewY += popupHeight;
         }
 
-        if (mPreviewPopup.isShowing()) {
+        // The key's centre in the preview's own coordinates, where it grows from (#903 H12a).
+        final float keyPivotX = key.x + key.width / 2f + mOffsetInWindow[0] - popupPreviewX;
+        final float keyPivotY = key.y + key.height / 2f + mOffsetInWindow[1] - popupPreviewY;
+        if (mPreviewPopup.isShowing() && !mPreviewLeaving) {
+            mPreviewPopup.update(popupPreviewX, popupPreviewY, popupWidth, popupHeight);
+        } else if (mPreviewPopup.isShowing()) {
+            // Caught while shrinking away: it stays, at full size, on the new key.
+            mPreviewLeaving = false;
+            PopupMotion.rest(mPreviewText);
             mPreviewPopup.update(popupPreviewX, popupPreviewY, popupWidth, popupHeight);
         } else {
+            mPreviewLeaving = false;
             mPreviewPopup.setWidth(popupWidth);
             mPreviewPopup.setHeight(popupHeight);
             mPreviewPopup.showAtLocation(mMiniKeyboardParent, Gravity.NO_GRAVITY,
                     popupPreviewX, popupPreviewY);
+            PopupMotion.grow(mPreviewText, keyPivotX, keyPivotY,
+                    (float) key.width / popupWidth, (float) key.height / popupHeight);
         }
         // Record popup preview position to display mini-keyboard later at the same positon
         mPopupPreviewDisplayedY = popupPreviewY;
@@ -1440,6 +1664,12 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
             inflateMiniKeyboardContainer();
         }
         if (mMiniKeyboard == null) return false;
+        if (mMiniKeyboardLeaving) {
+            // Still shrinking from the last long press: gone at once, so this one opens where it should.
+            mMiniKeyboardLeaving = false;
+            PopupMotion.rest(mMiniKeyboardContainer);
+            mMiniKeyboardPopup.dismiss();
+        }
         mMiniKeyboard.setKeyboard(kbd);
         mMiniKeyboardContainer.measure(MeasureSpec.makeMeasureSpec(getWidth(), MeasureSpec.AT_MOST),
                 MeasureSpec.makeMeasureSpec(getHeight(), MeasureSpec.AT_MOST));
@@ -1495,6 +1725,12 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         mMiniKeyboardPopup.setHeight(mMiniKeyboardContainer.getMeasuredHeight());
         //Log.i(TAG, "About to show popup " + mMiniKeyboardPopup + " from " + this);
         mMiniKeyboardPopup.showAtLocation(this, Gravity.NO_GRAVITY, adjustedX, y);
+        // It grows out of the long-pressed key (#903 H12a): the key's centre in the popup's coordinates.
+        PopupMotion.grow(mMiniKeyboardContainer,
+                popupKey.x + popupKey.width / 2f + mWindowOffset[0] + getPaddingLeft() - adjustedX,
+                popupKey.y + popupKey.height / 2f + mWindowOffset[1] + getPaddingTop() - y,
+                Math.min(1f, (float) popupKey.width / Math.max(1, mMiniKeyboardContainer.getMeasuredWidth())),
+                Math.min(1f, (float) popupKey.height / Math.max(1, mMiniKeyboardContainer.getMeasuredHeight())));
         mMiniKeyboardVisible = true;
 
         // Inject down event on the key to mini keyboard.
@@ -1598,6 +1834,8 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
     @Override
     public boolean onTouchEvent(MotionEvent me) {
+        // droidtop: a finger on the keys ends the pad's ring (mytop-project/tracker#338).
+        if (mPadFocus != null && me.getActionMasked() == MotionEvent.ACTION_DOWN) setPadFocus(null);
         return onTouchEvent(me, false);
     }
 
@@ -1613,6 +1851,9 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
         if (!mHasDistinctMultitouch && pointerCount > 1 && oldPointerCount > 1) {
             return true;
         }
+
+        // droidtop: glide typing sees a single finger first, before the swipe gestures (mytop-project/tracker#341).
+        if (offerToGlide(me, action)) return true;
 
         // Track the last few movements to look for spurious swipes.
         mSwipeTracker.addMovement(me);
@@ -1767,10 +2008,14 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
 
     public void closing() {
         Log.i(TAG, "closing " + this);
-        if (mPreviewPopup != null) mPreviewPopup.dismiss();
+        if (mPreviewPopup != null) {
+            mPreviewLeaving = false;
+            if (mPreviewText != null) PopupMotion.rest(mPreviewText);
+            mPreviewPopup.dismiss();
+        }
         mHandler.cancelAllMessages();
 
-        dismissPopupKeyboard();
+        dismissPopupKeyboard(false);
         //mMiniKeyboardContainer = null; // TODO: destroy/recycle the views?
         //mMiniKeyboard = null;
 
@@ -1794,13 +2039,25 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
     }
 
     protected boolean popupKeyboardIsShowing() {
-        return mMiniKeyboardPopup != null && mMiniKeyboardPopup.isShowing();
+        return mMiniKeyboardPopup != null && mMiniKeyboardPopup.isShowing() && !mMiniKeyboardLeaving;
     }
 
     protected void dismissPopupKeyboard() {
+        dismissPopupKeyboard(isAttachedToWindow());
+    }
+
+    /** droidtop patch (#903 H12a): [animate] shrinks the popup back into its key first; closing does not. */
+    protected void dismissPopupKeyboard(boolean animate) {
         if (mMiniKeyboardPopup != null) {
             //Log.i(TAG, "dismissPopupKeyboard() " + mMiniKeyboardPopup + " showing=" + mMiniKeyboardPopup.isShowing());
-            if (mMiniKeyboardPopup.isShowing()) {
+            if (mMiniKeyboardPopup.isShowing() && animate && mMiniKeyboardContainer != null) {
+                if (!mMiniKeyboardLeaving) {
+                    mMiniKeyboardLeaving = true;
+                    PopupMotion.shrink(mMiniKeyboardContainer, POPUP_LEAVE_SCALE, mDismissMiniKeyboard);
+                }
+            } else if (mMiniKeyboardPopup.isShowing()) {
+                mMiniKeyboardLeaving = false;
+                if (mMiniKeyboardContainer != null) PopupMotion.rest(mMiniKeyboardContainer);
                 mMiniKeyboardPopup.dismiss();
             }
             mMiniKeyboardVisible = false;
@@ -1810,7 +2067,7 @@ public class LatinKeyboardBaseView extends View implements PointerTracker.UIProx
     }
 
     public boolean handleBack() {
-        if (mMiniKeyboardPopup != null && mMiniKeyboardPopup.isShowing()) {
+        if (popupKeyboardIsShowing()) {
             dismissPopupKeyboard();
             return true;
         }

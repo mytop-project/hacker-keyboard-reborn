@@ -14,7 +14,6 @@ plugins {
     alias(libs.plugins.android.library)
     // The second-screen additions are Kotlin; the forked-in upstream tree
     // stays Java and is untouched apart from the one hook in LatinIME.
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
@@ -22,7 +21,7 @@ android {
     // androidx.core:core (via androidx-core-ktx, resolved from the shared
     // catalog) requires compiling against 36+ — same class of fix as
     // shell-default's own compileSdk bump.
-    compileSdk = 36
+    compileSdk { version = release(37) { minorApiLevel = 1 } }
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
@@ -30,6 +29,8 @@ android {
         // baseline (every other module targets 26) rather than carrying
         // a decade of pre-26 compatibility code paths we'll never run.
         minSdk = 26
+        // The downloaded speech engine's JNI library finds its Kotlin classes and their fields by name.
+        consumerProguardFiles("consumer-rules.pro")
         ndk {
             abiFilters += "arm64-v8a"
             abiFilters += "x86_64"
@@ -46,6 +47,7 @@ android {
         named("main") {
             manifest.srcFile("src/main/AndroidManifest.xml")
             java.srcDirs("src/main/java")
+            kotlin.srcDirs("src/main/java")
             res.srcDirs("src/main/res")
         }
     }
@@ -53,9 +55,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     // A key press on a hosted keyboard runs under Robolectric, which needs the merged resources.
@@ -69,12 +68,16 @@ android {
 }
 
 dependencies {
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
     implementation(libs.androidx.appcompat)
     // Inline autofill suggestions in the keyboard (Android 11+, mytop-project/tracker#342).
     implementation(libs.androidx.autofill)
     implementation(libs.androidx.core.ktx)
+    // Offline voice typing's English model arrives as a .tar.bz2, unpacked as it downloads (mytop-project/tracker#343).
+    implementation(libs.commons.compress)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
 }
+
+// AGP 9 built-in Kotlin uses the same bytecode target as Java.
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }

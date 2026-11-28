@@ -1,5 +1,6 @@
 package org.pocketworkstation.pckeyboard
 
+import android.view.inputmethod.EditorInfo
 import android.view.KeyEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,10 +72,52 @@ class EditingHelpersTest {
         assertEquals(h.entries, back.entries)
     }
 
+    @Test fun restoreMergesWithWhatWasRecordedWhileLoading() {
+        val saved = ClipboardHistory()
+        saved.add("from the file", 5)
+        saved.add("both", 6)
+        val h = ClipboardHistory()
+        h.add("copied before the load finished", 9)
+        h.add("both", 10)
+        h.restore(saved.encode())
+        assertEquals(listOf("both", "copied before the load finished", "from the file"), h.entries.map { it.text })
+        assertEquals(10L, h.entries.first { it.text == "both" }.at)
+    }
+
+    @Test fun aSensitiveFieldKeepsCopiesOutOfTheHistory() {
+        val text = EditorInfo.TYPE_CLASS_TEXT
+        val number = EditorInfo.TYPE_CLASS_NUMBER
+        assertTrue(IncognitoRules.sensitiveField(text or EditorInfo.TYPE_TEXT_VARIATION_PASSWORD, 0))
+        assertTrue(IncognitoRules.sensitiveField(text or EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD, 0))
+        assertTrue(IncognitoRules.sensitiveField(number or EditorInfo.TYPE_NUMBER_VARIATION_PASSWORD, 0))
+        assertTrue(IncognitoRules.sensitiveField(text, EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING))
+        assertFalse(IncognitoRules.sensitiveField(text or EditorInfo.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 0))
+        assertFalse(IncognitoRules.sensitiveField(number, 0))
+    }
+
+    @Test fun aSealedBlobFramesItsIvAndRefusesAnotherVersion() {
+        val iv = ByteArray(ClipboardVault.IV_BYTES) { it.toByte() }
+        val body = byteArrayOf(9, 8, 7)
+        val (backIv, backBody) = ClipboardVault.unframe(ClipboardVault.frame(iv, body))!!
+        assertTrue(iv.contentEquals(backIv) && body.contentEquals(backBody))
+        assertEquals(null, ClipboardVault.unframe(byteArrayOf(2) + iv + body))
+        assertEquals(null, ClipboardVault.unframe(byteArrayOf(ClipboardVault.VERSION) + iv))
+    }
+
     @Test fun restoreSkipsLinesThatDoNotParse() {
         val h = ClipboardHistory()
         h.restore("garbage\n-\tnotanumber\tx\nP\t7\tgood\n")
         assertEquals(listOf("good"), h.entries.map { it.text })
+    }
+
+    @Test fun keyTableNamesKeysAndShiftsTheSymbolsThatNeedIt() {
+        assertEquals(KeyStroke(KeyEvent.KEYCODE_1, shift = true), KeyTable.stroke('!'))
+        assertEquals(KeyStroke(KeyEvent.KEYCODE_SLASH), KeyTable.stroke('/'))
+        assertEquals(KeyStroke(KeyEvent.KEYCODE_Q, shift = true), KeyTable.stroke('Q'))
+        assertNull(KeyTable.stroke('é'))
+        assertEquals(KeyEvent.KEYCODE_PAGE_UP, KeyTable.named("PgUp"))
+        assertEquals(KeyEvent.KEYCODE_F12, KeyTable.named("f12"))
+        assertNull(KeyTable.named("nonsense"))
     }
 
     // --- inline autofill ---
@@ -135,9 +178,9 @@ class EditingHelpersTest {
 
     @Test fun aHeldSpaceRepeatsAtTheFarSideAndADragStillCancelsATap() {
         val sent = ArrayList<Pair<Int, Boolean>>()
-        val timer = object : HoldTimer {
+        val timer = object : KeyTimer {
             var action: (() -> Unit)? = null
-            override fun start(delayMs: Long, action: () -> Unit) { this.action = action }
+            override fun start(delayMs: Long, intervalMs: Long, action: () -> Unit) { this.action = action }
             override fun cancel() { action = null }
         }
         val resolver = CharKeyResolver { if (it == ' ') KeyStroke(KeyEvent.KEYCODE_SPACE) else null }

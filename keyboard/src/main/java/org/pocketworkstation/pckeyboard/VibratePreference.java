@@ -10,7 +10,9 @@ public class VibratePreference extends SeekBarPreferenceString {
     
     @Override
     public void onChange(float val) {
-        LatinIME ime = LatinIME.sInstance;
-        if (ime != null) ime.vibrate((int) val);
+        // droidtop patch (mytop-project/tracker#903 H12a): plays the length as Custom strength does, every key one buzz of it.
+        KeyHapticsPlayer sample = new KeyHapticsPlayer(getContext());
+        sample.setStrength(VibrationStrength.CUSTOM, (int) val);
+        sample.play('a');
     }
 }

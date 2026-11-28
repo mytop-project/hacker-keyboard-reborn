@@ -1,41 +1,15 @@
 package org.pocketworkstation.pckeyboard
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
-import android.view.InputDevice
-import android.view.KeyCharacterMap
-import android.view.KeyEvent
+import android.view.Display
 import android.view.View
+import android.view.WindowManager
 import android.widget.FrameLayout
-
-/**
- * Where droidtop's keyboard types (docs/SPEC.md 4c, "Typing on the add-on display", mytop-project/tracker#314).
- * Keys arrive on the hardware model [SecondScreenKeyboardListener] speaks: Android keycodes, pressed and
- * released, Shift as its own key around a capital. [text] carries what no key produces (an emoji from a
- * popup); a destination without a text channel (a compositor) sets [takesText] false.
- *
- * A held key reaches a hardware keyboard's far side as a stream of repeats the far side makes itself (a compositor
- * does). Any other destination (an input connection, a window, a draft) sees one key-down per press, so the panel
- * repeats Backspace, Delete, the arrows and Page Up and Down for it while they are held, unless the sink says its
- * far side repeats ([repeatsAtSource] false).
- */
-interface KeyboardSink {
-    fun key(androidKeyCode: Int, down: Boolean)
-
-    val takesText: Boolean get() = true
-
-    /** Whether the panel repeats a held repeatable key (true), or the destination does it itself (false). */
-    val repeatsAtSource: Boolean get() = true
-
-    fun text(chars: CharSequence) = Unit
-}
 
 /**
  * droidtop's one keyboard surface: the embedded Hacker's Keyboard grid ([SecondScreenKeyboard.createView], the
  * same `LatinKeyboardView`, layouts and themes droidtop's input method draws) wired to a [KeyboardSink]. Every
- * place droidtop draws a keyboard of its own uses this view: the companion's Input tab and its Keys button, the
+ * place droidtop draws a keyboard of its own uses this view: the companion's Input tab and its docked slab, the
  * Social tab's draft, droidtop's own text fields on a screen Android draws no keyboard on, and the keyboard
  * droidtop pops over another app on such a screen. Only the sink differs.
  *
@@ -43,7 +17,10 @@ interface KeyboardSink {
  * method does not also put its own view up ([SecondScreenKeyboard.setAttached]). It follows window visibility,
  * not attachment, because a stopped Activity's views stay attached (mytop-project/tracker#156).
  *
- * [context] must belong to the display the panel is drawn on: the key grid sizes itself from its metrics.
+ * [context] must belong to the display the panel is drawn on: the key grid sizes itself from its metrics. On the add-on
+ * screen of a handheld (any display but the device's own, whose short side is a handheld's) the panel is compact
+ * (mytop-project/tracker#903 H12c): Hacker's Compact 5-row layout, at [KeyboardModes.compactHeightPercent] of the height
+ * asked for, never a row shorter than a finger's press target.
  */
 class KeyboardPanel(
     context: Context,
@@ -53,43 +30,29 @@ class KeyboardPanel(
 ) : FrameLayout(context) {
 
     private var functionLayer = false
-    private val holdHandler = Handler(Looper.getMainLooper())
-    private val spaceTimer = object : HoldTimer {
-        private var pending: Runnable? = null
 
-        override fun start(delayMs: Long, action: () -> Unit) {
-            cancel()
-            val run = Runnable { action() }
-            pending = run
-            holdHandler.postDelayed(run, delayMs)
-        }
-
-        override fun cancel() {
-            pending?.let { holdHandler.removeCallbacks(it) }
-            pending = null
-        }
+    // Compact on the add-on screen (mytop-project/tracker#903 H12c), decided once from the display the panel is built for.
+    private val compact: Boolean = context.resources.displayMetrics.let { metrics ->
+        KeyboardModes.compactPanel(
+            onDefaultDisplay(context),
+            KeyboardForm.handheld(metrics.widthPixels, metrics.heightPixels, metrics.xdpi, metrics.ydpi, context.resources.configuration.smallestScreenWidthDp),
+        )
     }
-    private val repeatTimer = object : RepeatTimer {
-        private var pending: Runnable? = null
-
+    private val keysHeightPercent: Float = if (compact) {
+        context.resources.displayMetrics.let { KeyboardModes.compactHeightPercent(heightPercent, it.heightPixels, it.ydpi) }
+    } else {
+        heightPercent
+    }
+    private val spaceTimer = HandlerKeyTimer()
+    private val repeats = HandlerKeyTimer()
+    private val repeatTimer = object : KeyTimer {
         override fun start(delayMs: Long, intervalMs: Long, action: () -> Unit) {
-            cancel()
+            repeats.cancel()
             // Asked at each press: a routed sink changes where it types, and one route cannot afford a repeat.
-            if (!sink.repeatsAtSource) return
-            val run = object : Runnable {
-                override fun run() {
-                    action()
-                    holdHandler.postDelayed(this, intervalMs)
-                }
-            }
-            pending = run
-            holdHandler.postDelayed(run, delayMs)
+            if (sink.repeatsAtSource) repeats.start(delayMs, intervalMs, action)
         }
 
-        override fun cancel() {
-            pending?.let { holdHandler.removeCallbacks(it) }
-            pending = null
-        }
+        override fun cancel() = repeats.cancel()
     }
     private val listener = SecondScreenKeyboardListener(
         send = { code, down -> sink.key(code, down) },
@@ -101,12 +64,36 @@ class KeyboardPanel(
         repeatTimer = repeatTimer,
     )
     private val keyboardView: LatinKeyboardView? = run {
-        // The key grid reads the form (full, split, one-handed) from the shared settings, which only the input method loads.
-        LatinIME.sKeyboardSettings.form = ToolsPrefs.form(context)
-        runCatching { SecondScreenKeyboard.createView(context, listener, heightPercent) }.getOrNull()
+        // The key grid reads the form and space-bar drag from the shared settings, which only the input method loads.
+        ToolsPrefs.loadInto(LatinIME.sKeyboardSettings, context)
+        logged("key grid not built; the panel stays empty") { SecondScreenKeyboard.createView(context, FeedbackListener(listener), keysHeightPercent, compact) }
+            .getOrNull()
+    }
+
+    /**
+     * The panel's keys with a haptic per key class (mytop-project/tracker#903 H12a). droidtop has no vibration setting of
+     * its own, and its text-entry slab follows Android's touch feedback ([SlabView]), so these keys do too
+     * ([KeyHapticsPlayer.viewFeedback]); the input method's "Vibration strength" is the input method's.
+     */
+    private inner class FeedbackListener(private val keys: SecondScreenKeyboardListener) : LatinKeyboardBaseView.OnKeyboardActionListener {
+        override fun onPress(primaryCode: Int) {
+            keyboardView?.let { KeyHapticsPlayer.viewFeedback(it, primaryCode) }
+            keys.onPress(primaryCode)
+        }
+
+        override fun onRelease(primaryCode: Int) = keys.onRelease(primaryCode)
+        override fun onKey(primaryCode: Int, keyCodes: IntArray?, x: Int, y: Int) = keys.onKey(primaryCode, keyCodes, x, y)
+        override fun onText(text: CharSequence?) = keys.onText(text)
+        override fun onCancel() = keys.onCancel()
+        override fun swipeLeft(): Boolean = keys.swipeLeft()
+        override fun swipeRight(): Boolean = keys.swipeRight()
+        override fun swipeDown(): Boolean = keys.swipeDown()
+        override fun swipeUp(): Boolean = keys.swipeUp()
+        override fun onCursorDrag(steps: Int) = keys.onCursorDrag(steps)
     }
 
     // The tool strip (clipboard history, macros, incognito) above the grid, or the grid alone when it is switched off.
+    // No MediaTarget: this panel has no InputConnection, so its emoji panel has no GIFs or Stickers tabs (SPEC 6a).
     private val deck: View? = keyboardView?.let { grid ->
         ToolsDeck.wrap(
             context,
@@ -119,8 +106,6 @@ class KeyboardPanel(
     }
 
     init {
-        // Space-bar drag is read by the key tracker from the shared settings, which only the input method loads.
-        LatinIME.sKeyboardSettings.spaceDrag = ToolsPrefs.spaceDrag(context)
         // Never a focus target: a tap on a key must leave focus on the field being typed into (and on the screen
         // the user is typing on, for the companion).
         isFocusable = false
@@ -138,16 +123,21 @@ class KeyboardPanel(
     /** The key grid again, for a form that changed: the same layer, built with the new shape. */
     private fun rebuildKeys() {
         val view = keyboardView ?: return
-        SecondScreenKeyboard.applyLayout(view, context, functionLayer, heightPercent)
+        SecondScreenKeyboard.applyLayout(view, context, functionLayer, keysHeightPercent, compact)
     }
 
     private fun toggleLayout() {
         val view = keyboardView ?: return
         functionLayer = !functionLayer
-        SecondScreenKeyboard.applyLayout(view, context, functionLayer, heightPercent)
+        SecondScreenKeyboard.applyLayout(view, context, functionLayer, keysHeightPercent, compact)
     }
 
     private var countedForIme = false
+
+    /** The animation settings, read each time the panel comes on screen (mytop-project/tracker#903 H12a). */
+    private fun refreshMotion() {
+        if (isAttachedToWindow && windowVisibility == View.VISIBLE) KeyboardMotion.refresh(context)
+    }
 
     private fun syncImeSuppression() {
         if (!suppressImeView) return
@@ -160,11 +150,13 @@ class KeyboardPanel(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         syncImeSuppression()
+        refreshMotion()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         syncImeSuppression()
+        refreshMotion()
     }
 
     override fun onDetachedFromWindow() {
@@ -176,84 +168,11 @@ class KeyboardPanel(
         listener.releaseEverything()
         super.onDetachedFromWindow()
     }
-}
 
-/**
- * The meta state a hardware-style key stream implies. A synthetic key event has no framework meta tracking
- * behind it, so a capital is only reliably one when the letter's own event carries META_SHIFT_ON. This is the
- * pairing Android itself defines between `KEYCODE_*_LEFT/RIGHT` and `META_*_ON`.
- */
-object KeyMeta {
-    fun updated(current: Int, keyCode: Int, down: Boolean): Int {
-        val bit = when (keyCode) {
-            KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> KeyEvent.META_SHIFT_ON
-            KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> KeyEvent.META_CTRL_ON
-            KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT -> KeyEvent.META_ALT_ON
-            KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT -> KeyEvent.META_META_ON
-            else -> return current
-        }
-        return if (down) current or bit else current and bit.inv()
-    }
-}
-
-/**
- * Types into the editor droidtop's input method is bound to ([SecondScreenKeyboard.androidTarget]): whatever text
- * field has focus, in any app, on any display, as long as droidtop's keyboard is the selected input method. Each
- * key is an `InputConnection.sendKeyEvent`, whose contract is "as though a hardware key was pressed". This works
- * where Android draws no keyboard window, because the input session does not depend on that window (SPEC 4c).
- * [onNoTarget] runs when a key finds no editor.
- */
-class ImeConnectionSink(private val onNoTarget: () -> Unit = {}) : KeyboardSink {
-    private var metaState = 0
-
-    override fun key(androidKeyCode: Int, down: Boolean) {
-        metaState = KeyMeta.updated(metaState, androidKeyCode, down)
-        val connection = SecondScreenKeyboard.androidTarget
-        if (connection == null) {
-            onNoTarget()
-            return
-        }
-        val now = SystemClock.uptimeMillis()
-        connection.sendKeyEvent(
-            KeyEvent(now, now, if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP, androidKeyCode, 0, metaState),
-        )
-    }
-
-    override fun text(chars: CharSequence) {
-        SecondScreenKeyboard.androidTarget?.commitText(chars, 1)
-    }
-}
-
-/**
- * Types into a field of droidtop's OWN window: each key is dispatched into [target] (a view of that window) as a
- * key from Android's virtual keyboard device, the path an attached keyboard's key takes inside that window. No
- * input method and no window focus are involved, so it works on a screen Android draws no keyboard on. Text no
- * key produces is turned into keys by the virtual keyboard's own character map; what it cannot type is dropped.
- */
-class WindowKeySink(private val target: () -> View?) : KeyboardSink {
-    private var metaState = 0
-
-    override fun key(androidKeyCode: Int, down: Boolean) {
-        metaState = KeyMeta.updated(metaState, androidKeyCode, down)
-        val view = target() ?: return
-        val now = SystemClock.uptimeMillis()
-        view.dispatchKeyEvent(
-            KeyEvent(
-                now, now,
-                if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP,
-                androidKeyCode, 0, metaState,
-                KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE,
-                InputDevice.SOURCE_KEYBOARD,
-            ),
-        )
-    }
-
-    override fun text(chars: CharSequence) {
-        val view = target() ?: return
-        val events = runCatching {
-            KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(chars.toString().toCharArray())
-        }.getOrNull() ?: return
-        events.forEach { view.dispatchKeyEvent(it) }
+    private companion object {
+        /** Whether [context] draws on the device's own screen (any context that names no other display does). */
+        @Suppress("DEPRECATION") // Context.getDisplay is Android 11's; a display context's WindowManager answers on 8 too.
+        fun onDefaultDisplay(context: Context): Boolean =
+            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.displayId?.let { it == Display.DEFAULT_DISPLAY } ?: true
     }
 }

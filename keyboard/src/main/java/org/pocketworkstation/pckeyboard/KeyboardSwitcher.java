@@ -59,7 +59,9 @@ public class KeyboardSwitcher implements
     // Symbols keyboard layout with the settings key
     public static final int KEYBOARDMODE_SYMBOLS_WITH_SETTINGS_KEY = R.id.mode_symbols_with_settings_key;
 
-    public static final String DEFAULT_LAYOUT_ID = "0";
+    // Modern, once "Follow light or dark" (KeyboardAppearance.FOLLOW), for anyone who never chose a theme
+    // (mytop-project/tracker#562, #903 H12b).
+    public static final String DEFAULT_LAYOUT_ID = "8";
     public static final String PREF_KEYBOARD_LAYOUT = "pref_keyboard_layout";
     private static final int[] THEMES = new int[] {
         R.layout.input_ics,
@@ -72,6 +74,14 @@ public class KeyboardSwitcher implements
         R.layout.input_material_black,
     };
 
+    /**
+     * The layout a theme id draws with, Material dark for an id with none (droidtop, #903 H12b: the theme picker's
+     * previews read a classic theme's own key drawing from it).
+     */
+    static int themeLayout(int drawn) {
+        return drawn >= 0 && drawn < THEMES.length ? THEMES[drawn] : THEMES[KeyboardAppearance.MATERIAL_DARK];
+    }
+
     // Tables which contains resource ids for each character theme color
     private static final int KBD_PHONE = R.xml.kbd_phone;
     private static final int KBD_PHONE_SYMBOLS = R.xml.kbd_phone_symbols;
@@ -82,6 +92,8 @@ public class KeyboardSwitcher implements
     private static final int KBD_FULL_FN = R.xml.kbd_full_fn;
     private static final int KBD_COMPACT = R.xml.kbd_compact;
     private static final int KBD_COMPACT_FN = R.xml.kbd_compact_fn;
+    // droidtop (mytop-project/tracker#903 H12c): the number and calculator pad mode's keys.
+    private static final int KBD_NUMPAD = R.xml.kbd_numpad;
 
     private LatinKeyboardView mInputView;
     private static final int[] ALPHABET_MODES = { KEYBOARDMODE_NORMAL,
@@ -137,6 +149,8 @@ public class KeyboardSwitcher implements
     private LanguageSwitcher mLanguageSwitcher;
 
     private int mLayoutId;
+    // The theme the person stored; mLayoutId is the one drawn (KeyboardAppearance.resolve).
+    private int mStoredLayoutId;
 
     private static final KeyboardSwitcher sInstance = new KeyboardSwitcher();
 
@@ -153,8 +167,10 @@ public class KeyboardSwitcher implements
 
         final SharedPreferences prefs = PreferenceManager
                 .getDefaultSharedPreferences(ims);
-        sInstance.mLayoutId = Integer.valueOf(prefs.getString(
+        sInstance.mStoredLayoutId = parseLayout(prefs.getString(
                 PREF_KEYBOARD_LAYOUT, DEFAULT_LAYOUT_ID));
+        sInstance.mLayoutId = KeyboardAppearance.resolve(sInstance.mStoredLayoutId,
+                KeyboardAppearance.isLight(ims));
 
         sInstance.updateSettingsKeyState(prefs);
         prefs.registerOnSharedPreferenceChangeListener(sInstance);
@@ -359,6 +375,12 @@ public class KeyboardSwitcher implements
 
     private KeyboardId getKeyboardId(int mode, int imeOptions, boolean isSymbols) {
         boolean hasVoice = hasVoiceButton(isSymbols);
+        // droidtop (mytop-project/tracker#903 H12c): the number pad mode takes the place of the letters in any field Hacker's
+        // gives letters; Hacker's own phone pad stays for phone, number and date fields. Normal gives the letters back.
+        if (!isSymbols && mode != MODE_PHONE
+                && KeyboardModes.current(mInputMethodService) == KeyboardModes.Mode.NUMBER_PAD) {
+            return new KeyboardId(KBD_NUMPAD, 0, false, hasVoice);
+        }
         if (mFullMode > 0) {
             switch (mode) {
             case MODE_TEXT:
@@ -611,13 +633,37 @@ public class KeyboardSwitcher implements
         changeLatinKeyboardView(mLayoutId, true);
     }
 
+    /**
+     * Draws the theme the stored choice means now: a modern theme changes with Light and dark (the
+     * setting, the host's or the system's; mytop-project/tracker#562, #903 H12b), and Dynamic with the
+     * wallpaper's palette. Called as an editor starts and after a configuration change (a new
+     * wallpaper's palette arrives as one); the view is built again only when the theme drawn or its
+     * colours differ from what is on screen.
+     */
+    public void refreshAppearance() {
+        if (mInputMethodService == null) return;
+        int drawn = KeyboardAppearance.resolve(mStoredLayoutId,
+                KeyboardAppearance.isLight(mInputMethodService));
+        boolean recolored = mInputView != null
+                && !java.util.Objects.equals(mInputView.getPlates(), KeyPlates.colorsFor(mInputMethodService));
+        if (drawn != mLayoutId || recolored) changeLatinKeyboardView(drawn, true);
+    }
+
+    private static int parseLayout(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return KeyboardAppearance.FOLLOW;
+        }
+    }
+
     private void changeLatinKeyboardView(int newLayout, boolean forceReset) {
         if (mLayoutId != newLayout || mInputView == null || forceReset) {
             if (mInputView != null) {
                 mInputView.closing();
             }
-            if (THEMES.length <= newLayout) {
-                newLayout = Integer.valueOf(DEFAULT_LAYOUT_ID);
+            if (newLayout < 0 || THEMES.length <= newLayout) {
+                newLayout = KeyboardAppearance.MATERIAL_DARK;
             }
 
             LatinIMEUtil.GCUtils.getInstance().reset();
@@ -653,9 +699,11 @@ public class KeyboardSwitcher implements
 
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences,
             String key) {
-        if (PREF_KEYBOARD_LAYOUT.equals(key)) {
-            changeLatinKeyboardView(Integer.valueOf(sharedPreferences
-                    .getString(key, DEFAULT_LAYOUT_ID)), true);
+        if (PREF_KEYBOARD_LAYOUT.equals(key) || KeyboardAppearance.KEY_LIGHT_DARK.equals(key)) {
+            // droidtop: "Light and dark" redraws a modern theme too (#903 H12b).
+            mStoredLayoutId = parseLayout(sharedPreferences.getString(PREF_KEYBOARD_LAYOUT, DEFAULT_LAYOUT_ID));
+            changeLatinKeyboardView(KeyboardAppearance.resolve(mStoredLayoutId,
+                    KeyboardAppearance.isLight(mInputMethodService)), true);
         } else if (LatinIMESettings.PREF_SETTINGS_KEY.equals(key)) {
             updateSettingsKeyState(sharedPreferences);
             recreateInputView();

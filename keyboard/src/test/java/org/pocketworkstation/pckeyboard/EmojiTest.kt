@@ -22,7 +22,7 @@ class EmojiTest {
         🇳🇴;flag: Norway;flag|norway
     """.trimIndent()
 
-    @Test fun parsingKeepsGroupsInOrderAndLeavesSkinToneVariantsOut() {
+    @Test fun parsingKeepsGroupsInOrderAndLeavesSkinToneVariantsOutOfTheGrid() {
         val catalog = EmojiCatalog.parse(sample)
         assertEquals(listOf("smileys_emotion", "people_body", "flags"), catalog.groups.map { it.id })
         assertEquals(listOf("😀", "😂", "🙂"), catalog.groups[0].entries.map { it.emoji })
@@ -55,6 +55,13 @@ class EmojiTest {
         assertEquals(1, catalog.search("face", limit = 1).size)
     }
 
+    @Test fun onlyWhatTheDeviceCanDrawIsOffered() {
+        val catalog = EmojiCatalog.parse(sample).drawable { it != "😂" && it != "🇳🇴" }
+        assertEquals(listOf("smileys_emotion", "people_body"), catalog.groups.map { it.id })
+        assertEquals(listOf("😀", "🙂"), catalog.groups[0].entries.map { it.emoji })
+        assertTrue(catalog.search("joy").isEmpty())
+    }
+
     @Test fun recentsAreNewestFirstWithoutRepeatsAndBounded() {
         var recent = emptyList<String>()
         for (e in listOf("a", "b", "c", "a")) recent = EmojiRecents.push(recent, e)
@@ -62,5 +69,70 @@ class EmojiTest {
         assertEquals(listOf("x", "a"), EmojiRecents.push(listOf("a", "b"), "x", max = 2))
         assertEquals(recent, EmojiRecents.decode(EmojiRecents.encode(recent)))
         assertFalse(EmojiRecents.decode(null).any())
+    }
+
+    // mytop-project/tracker#903 H4: skin tones.
+
+    @Test fun aToneVariantIsKeptOnTheEntryAboveIt() {
+        val catalog = EmojiCatalog.parse(sample)
+        val wave = catalog.groups[1].entries[0]
+        assertEquals(listOf("👋🏻"), wave.variants)
+        assertEquals(wave, catalog.entryOf("👋🏻"))
+        assertEquals(wave, catalog.entryOf("👋"))
+        assertTrue(catalog.groups[0].entries.all { it.variants.isEmpty() })
+    }
+
+    private val wave = EmojiEntry("👋", "waving hand", emptyList(), listOf("👋🏻", "👋🏼", "👋🏽", "👋🏾", "👋🏿"))
+
+    @Test fun theGridShowsTheToneLastPicked() {
+        assertEquals("👋", EmojiTones.shown(wave, 0))
+        assertEquals("👋🏻", EmojiTones.shown(wave, 1))
+        assertEquals("👋🏿", EmojiTones.shown(wave, 5))
+        // No tones: always the emoji itself.
+        assertEquals("😀", EmojiTones.shown(EmojiEntry("😀", "grinning face", emptyList()), 3))
+    }
+
+    @Test fun twoPeopleShowTheToneWhereBothHaveIt() {
+        // 25 variants, the first person's tone times the second's: both medium (3) is index 2 * 5 + 2 = 12.
+        val pair = EmojiEntry("🧑‍🤝‍🧑", "people holding hands", emptyList(), (0 until 25).map { "v$it" })
+        assertEquals("v12", EmojiTones.shown(pair, 3))
+        assertEquals(3, EmojiTones.toneOfPick(pair, "v12"))
+        // A mixed pair is typed but doesn't change the tone.
+        assertEquals(null, EmojiTones.toneOfPick(pair, "v1"))
+    }
+
+    @Test fun aPickFromTheRowSetsTheTone() {
+        assertEquals(0, EmojiTones.toneOfPick(wave, "👋"))
+        assertEquals(4, EmojiTones.toneOfPick(wave, "👋🏾"))
+    }
+
+    @Test fun aToneTheDeviceCantDrawDropsThatEmojisTones() {
+        val catalog = EmojiCatalog.parse(sample).drawable { it != "👋🏻" }
+        assertEquals(emptyList<String>(), catalog.groups[1].entries[0].variants)
+    }
+
+    // mytop-project/tracker#903 H4: emoji for the word just typed.
+
+    @Test fun aWholeWordOffersItsEmojiBestFirst() {
+        val catalog = EmojiCatalog.parse(sample)
+        // "joy" is a keyword of tears of joy; "smile" a keyword of two, ranked in the data's order.
+        assertEquals(listOf("😂"), catalog.suggest("joy").map { it.emoji })
+        assertEquals(listOf("😀", "🙂"), catalog.suggest("smile").map { it.emoji })
+        // A name word beats a keyword: "waving" is in the hand's name.
+        assertEquals(listOf("👋"), catalog.suggest("Waving").map { it.emoji })
+    }
+
+    @Test fun halfWordsShortWordsAndNumbersOfferNothing() {
+        val catalog = EmojiCatalog.parse(sample)
+        assertTrue(catalog.suggest("smi").isEmpty())
+        assertTrue(catalog.suggest("hi").isEmpty())
+        assertTrue(catalog.suggest("joy2").isEmpty())
+    }
+
+    @Test fun theWordBeforeTheCursor() {
+        assertEquals("pizza", EmojiWords.lastWord("I want pizza"))
+        assertEquals("", EmojiWords.lastWord("I want pizza "))
+        assertEquals("", EmojiWords.lastWord(null))
+        assertEquals("caf\u00e9", EmojiWords.lastWord("le caf\u00e9"))
     }
 }

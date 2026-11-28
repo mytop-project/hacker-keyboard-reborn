@@ -40,8 +40,6 @@
     <string name="title_swipe_gestures">Жесты</string>
     <string name="title_hardware_key_actions">Кнопки</string>
 
-    <!-- Option to provide vibrate/haptic feedback on keypress -->
-    <string name="vibrate_on_keypress">Виброотклик клавиш</string>
 
     <!-- Option to play back sound on keypress in soft keyboard -->
     <string name="sound_on_keypress">Звук клавиш</string>

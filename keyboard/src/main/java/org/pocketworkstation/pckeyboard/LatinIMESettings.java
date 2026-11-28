@@ -46,11 +46,15 @@ public class LatinIMESettings extends PreferenceActivity
     private static final String VOICE_SETTINGS_KEY = "voice_mode";
     /* package */ static final String PREF_SETTINGS_KEY = "settings_key";
     static final String INPUT_CONNECTION_INFO = "input_connection_info";    
+    /** droidtop: the group that holds the languages, where a language engine adds its own rows (#903 H7c). */
+    private static final String ENGINE_ROWS_GROUP = "layout_settings";
 
     private static final String TAG = "LatinIMESettings";
 
     // Dialog ids
     private static final int VOICE_INPUT_CONFIRM_DIALOG = 0;
+
+    public static final String EXTRA_OPEN_DICTIONARIES = "open_dictionaries";
 
     private CheckBoxPreference mQuickFixes;
     private ListPreference mVoicePreference;
@@ -68,6 +72,8 @@ public class LatinIMESettings extends PreferenceActivity
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        // droidtop: pro mode is decided before the screen reads it (mytop-project/tracker#337).
+        boolean pro = KeyboardProMode.isPro(getPreferenceManager().getSharedPreferences());
         addPreferencesFromResource(R.xml.prefs);
         mQuickFixes = (CheckBoxPreference) findPreference(QUICK_FIXES_KEY);
         mVoicePreference = (ListPreference) findPreference(VOICE_SETTINGS_KEY);
@@ -80,6 +86,77 @@ public class LatinIMESettings extends PreferenceActivity
         mKeyboardModePortraitPreference = (ListPreference) findPreference("pref_keyboard_mode_portrait");
         mKeyboardModeLandscapePreference = (ListPreference) findPreference("pref_keyboard_mode_landscape");
         
+        // droidtop: the keyboard's own dictionaries (mytop-project/tracker#339).
+        Preference dictionaries = findPreference(DictionaryRow.KEY);
+        if (dictionaries != null) {
+            dictionaries.setOnPreferenceClickListener(p -> {
+                DictionaryRow.open(this, p);
+                return true;
+            });
+            // Setup uses the same manager and result handling as Settings, once on a fresh launch.
+            if (icicle == null && getIntent().getBooleanExtra(EXTRA_OPEN_DICTIONARIES, false)) {
+                DictionaryRow.open(this, dictionaries);
+            }
+        }
+
+        // droidtop: the folders the emoji panel's GIFs and Stickers tabs read (mytop-project/tracker#903 H5).
+        Preference gifFolders = findPreference(GifFoldersRow.KEY);
+        if (gifFolders != null) {
+            gifFolders.setOnPreferenceClickListener(p -> {
+                GifFoldersRow.open(this, p);
+                return true;
+            });
+        }
+
+        // droidtop: offline voice typing's download (mytop-project/tracker#343).
+        Preference offlineVoice = findPreference(OfflineVoiceRow.KEY);
+        if (offlineVoice != null) {
+            offlineVoice.setOnPreferenceClickListener(p -> {
+                OfflineVoiceRow.open(this, p);
+                return true;
+            });
+            OfflineVoice.refresh(this, () -> runOnUiThread(() -> offlineVoice.setSummary(OfflineVoiceRow.summary(this))));
+        }
+
+        // droidtop: a language engine's own rows (Japanese's dictionary), after the languages (mytop-project/tracker#903 H7c).
+        Preference layoutGroup = findPreference(ENGINE_ROWS_GROUP);
+        if (layoutGroup instanceof PreferenceGroup) EngineSettingsRows.addTo(this, (PreferenceGroup) layoutGroup);
+
+        // droidtop: the short screen hides what it leaves out, after every field above is held (mytop-project/tracker#337).
+        if (!pro) KeyboardProMode.applySimple(getPreferenceScreen());
+        Preference reset = findPreference(KeyboardProMode.RESET_KEY);
+        if (reset != null) {
+            reset.setOnPreferenceClickListener(p -> {
+                new android.app.AlertDialog.Builder(this)
+                        .setMessage(R.string.confirm_reset_modern)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.action_reset, (d, w) -> {
+                            KeyboardProMode.reset(this, getPreferenceManager().getSharedPreferences());
+                            recreate();
+                        })
+                        .show();
+                return true;
+            });
+        }
+
+        Preference presets = findPreference(KeyboardProMode.PRESET_KEY);
+        if (presets != null) {
+            presets.setOnPreferenceClickListener(p -> {
+                KeyboardProMode.Preset[] all = KeyboardProMode.Preset.values();
+                CharSequence[] names = new CharSequence[all.length];
+                for (int i = 0; i < all.length; i++) names[i] = all[i].getLabel() + "\n" + all[i].getAbout();
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle(R.string.title_keyboard_preset)
+                        .setItems(names, (d, which) -> {
+                            KeyboardProMode.apply(this, getPreferenceManager().getSharedPreferences(), all[which]);
+                            recreate();
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+                return true;
+            });
+        }
+
         SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
         prefs.registerOnSharedPreferenceChangeListener(this);
 
@@ -112,6 +189,10 @@ public class LatinIMESettings extends PreferenceActivity
         }
         
         updateSummaries();
+        Preference offlineVoice = findPreference(OfflineVoiceRow.KEY);
+        if (offlineVoice != null) offlineVoice.setSummary(OfflineVoiceRow.summary(this));
+        Preference layoutGroup = findPreference(ENGINE_ROWS_GROUP);
+        if (layoutGroup instanceof PreferenceGroup) EngineSettingsRows.refresh(this, (PreferenceGroup) layoutGroup);
 
         String version = "";
         try {
@@ -139,6 +220,17 @@ public class LatinIMESettings extends PreferenceActivity
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == DictionaryRow.PICK_REQUEST && resultCode == RESULT_OK && data != null) {
+            DictionaryRow.picked(this, findPreference(DictionaryRow.KEY), data.getData());
+        }
+        if (requestCode == GifFoldersRow.PICK_REQUEST && resultCode == RESULT_OK && data != null) {
+            GifFoldersRow.picked(this, findPreference(GifFoldersRow.KEY), data.getData());
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         getPreferenceManager().getSharedPreferences().unregisterOnSharedPreferenceChangeListener(
                 this);
@@ -147,6 +239,12 @@ public class LatinIMESettings extends PreferenceActivity
 
     public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
         (new BackupManager(this)).dataChanged();
+        // droidtop: pro mode shows or hides options, so the screen is built again (mytop-project/tracker#337).
+        if (KeyboardProMode.KEY.equals(key)) {
+            recreate();
+            return;
+        }
+        if (key == null) return;
         // If turning on voice input, show dialog
         if (key.equals(VOICE_SETTINGS_KEY) && !mVoiceOn) {
             if (!prefs.getString(VOICE_SETTINGS_KEY, mVoiceModeOff)

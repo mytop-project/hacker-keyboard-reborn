@@ -32,8 +32,10 @@ import android.view.View;
  * This class loads a dictionary and provides a list of suggestions for a given sequence of 
  * characters. This includes corrections and completions.
  * @hide pending API Council Approval
+ *
+ * droidtop (mytop-project/tracker#903 H6): the Latin engine's dictionaries ({@link LatinEngine.Lexicon}), with no change.
  */
-public class Suggest implements Dictionary.WordCallback {
+public class Suggest implements Dictionary.WordCallback, LatinEngine.Lexicon {
 	private static String TAG = "PCKeyboard";
 	
     public static final int APPROX_MAX_WORD_LENGTH = 32;
@@ -140,6 +142,15 @@ public class Suggest implements Dictionary.WordCallback {
 
     public void setCorrectionMode(int mode) {
         mCorrectionMode = mode;
+    }
+
+    /**
+     * droidtop: a main dictionary that arrived after this was made (a converted wordlist, loaded off the main thread,
+     * mytop-project/tracker#339). Main thread only.
+     */
+    public void setMainDictionary(BinaryDictionary dictionary) {
+        if (mMainDict != null) mMainDict.close();
+        mMainDict = dictionary;
     }
 
     public boolean hasMainDictionary() {

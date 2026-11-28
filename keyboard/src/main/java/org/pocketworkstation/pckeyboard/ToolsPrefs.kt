@@ -21,6 +21,9 @@ object ToolsPrefs {
     /** Whether copied text is recorded into the clipboard history. */
     const val CLIPBOARD = "pref_clipboard_history"
 
+    /** "Keep clips for" ([ClipKeep]); unset is Until cleared, what the history did before it (mytop-project/tracker#903 H12d). */
+    const val CLIPBOARD_KEEP = "pref_clipboard_keep"
+
     /** Dragging a finger along the space bar moves the cursor. */
     const val SPACE_DRAG = "pref_space_drag"
 
@@ -32,6 +35,12 @@ object ToolsPrefs {
 
     /** The emoji used last, newest first, one per line. */
     const val RECENT_EMOJI = "pref_emoji_recent"
+
+    /** The folders GIFs and stickers are read from, one tree URI per line ([GifFolderList], mytop-project/tracker#903 H5). */
+    const val GIF_FOLDERS = "pref_gif_folders"
+
+    /** The GIFs and stickers used last, newest first, one document URI per line. */
+    const val RECENT_GIF = "pref_gif_recent"
 
     /** The macros, one per line (see [MacroParser]). */
     const val MACROS = "pref_macros"
@@ -45,13 +54,48 @@ object ToolsPrefs {
 
     fun clipboardHistory(context: Context): Boolean = prefs(context).getBoolean(CLIPBOARD, true)
 
-    fun form(context: Context): KeyboardForm.Form = KeyboardForm.of(prefs(context).getString(KeyboardForm.PREF, null))
+    fun clipboardKeep(context: Context): ClipKeep = ClipKeep.fromPref(prefs(context).getString(CLIPBOARD_KEEP, null))
+
+    /**
+     * The key grid's form for [context]'s screen and orientation: the shape setting's ([KeyboardForm.choose],
+     * mytop-project/tracker#903 H1), or the input method's mode's ([KeyboardModes.formFor], H12c).
+     */
+    fun form(context: Context): KeyboardForm.Form = migrate(context).let { KeyboardModes.formFor(context, KeyboardForm.forScreen(
+        prefs(context).getString(KeyboardForm.PREF, null),
+        prefs(context).getString(KeyboardForm.PREF_LANDSCAPE, null),
+        context,
+    )) }
+
+    /** Keeps [form] as the choice for [context]'s current orientation, and in the shared settings. */
+    fun setForm(context: Context, form: KeyboardForm.Form) {
+        val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        prefs(context).edit().putString(KeyboardForm.prefFor(landscape), form.id).apply()
+        if (landscape) LatinIME.sKeyboardSettings.formLandscapeChoice = form.id else LatinIME.sKeyboardSettings.formChoice = form.id
+    }
+
+    /** H1's shapes per orientation, then H12c's one store for the shapes and the modes, each once. */
+    private fun migrate(context: Context) {
+        KeyboardForm.migrate(prefs(context))
+        KeyboardModes.migrate(prefs(context))
+    }
 
     fun inlineAutofill(context: Context): Boolean = InlineRules.wanted(Build.VERSION.SDK_INT, prefs(context).getBoolean(INLINE_AUTOFILL, true))
 
     fun emoji(context: Context): Boolean = prefs(context).getBoolean(EMOJI, true)
 
     fun spaceDrag(context: Context): Boolean = prefs(context).getBoolean(SPACE_DRAG, true)
+
+    /**
+     * Loads what a panel's key grid reads from the shared [GlobalKeyboardSettings] (the form and space-bar drag). The
+     * input method loads its own through `initPrefs`; a panel drawn without it (KeyboardPanel) calls this instead,
+     * once, before building its grid, rather than setting fields one by one (mytop-project/tracker#772).
+     */
+    fun loadInto(settings: GlobalKeyboardSettings, context: Context) {
+        migrate(context)
+        settings.formChoice = prefs(context).getString(KeyboardForm.PREF, null) ?: ""
+        settings.formLandscapeChoice = prefs(context).getString(KeyboardForm.PREF_LANDSCAPE, null) ?: ""
+        settings.spaceDrag = spaceDrag(context)
+    }
 
     fun macroSource(context: Context): String = prefs(context).getString(MACROS, "") ?: ""
 
@@ -75,4 +119,22 @@ object IncognitoRules {
     @JvmStatic
     fun learningAllowed(incognito: Boolean, imeOptions: Int, passwordField: Boolean): Boolean =
         !incognito && !passwordField && imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0
+
+    /**
+     * Whether a field of [inputType] and [imeOptions] holds something the clipboard history must not keep
+     * (mytop-project/tracker#772): any password variation, text, web, visible or numeric, or an editor that asked for no
+     * personalised learning. A copy made while such a field has the keyboard is not recorded.
+     */
+    @JvmStatic
+    fun sensitiveField(inputType: Int, imeOptions: Int): Boolean {
+        val variation = inputType and EditorInfo.TYPE_MASK_VARIATION
+        val password = when (inputType and EditorInfo.TYPE_MASK_CLASS) {
+            EditorInfo.TYPE_CLASS_TEXT -> variation == EditorInfo.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                variation == EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            EditorInfo.TYPE_CLASS_NUMBER -> variation == EditorInfo.TYPE_NUMBER_VARIATION_PASSWORD
+            else -> false
+        }
+        return password || imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0
+    }
 }

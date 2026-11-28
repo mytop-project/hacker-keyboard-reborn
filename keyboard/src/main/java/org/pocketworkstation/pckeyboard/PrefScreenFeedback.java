@@ -20,7 +20,10 @@ import android.app.backup.BackupManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.preference.ListPreference;
+import android.preference.Preference;
 import android.preference.PreferenceActivity;
+import android.preference.PreferenceManager;
+import android.preference.PreferenceScreen;
 
 public class PrefScreenFeedback extends PreferenceActivity
         implements SharedPreferences.OnSharedPreferenceChangeListener {
@@ -28,9 +31,29 @@ public class PrefScreenFeedback extends PreferenceActivity
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        // droidtop patch (mytop-project/tracker#903 H12a): Vibrate on keypress is shown as Vibration strength from here on,
+        // even before the keyboard itself has run since the update.
+        KeyHapticsPlayer.migrate(PreferenceManager.getDefaultSharedPreferences(this));
         addPreferencesFromResource(R.xml.prefs_feedback);
         SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
         prefs.registerOnSharedPreferenceChangeListener(this);
+        mDuration = findPreference(KeyHaptics.LEN_PREF);
+        showDuration(prefs);
+    }
+
+    // droidtop patch (#903 H12a): Hacker's "Vibrate duration" row, shown in pro mode or while the strength is Custom
+    // (KeyHaptics.showsDuration). Hidden the way KeyboardProMode hides a pro row: taken off the screen, its value kept.
+    private Preference mDuration;
+
+    private void showDuration(SharedPreferences prefs) {
+        if (mDuration == null) return;
+        PreferenceScreen screen = getPreferenceScreen();
+        boolean show = KeyHaptics.showsDuration(
+                VibrationStrength.of(prefs.getString(KeyHaptics.PREF, null)), KeyboardProMode.isPro(prefs));
+        boolean shown = screen.findPreference(KeyHaptics.LEN_PREF) != null;
+        // Put back, it keeps its order from the XML, so it returns under Vibration strength.
+        if (show && !shown) screen.addPreference(mDuration);
+        else if (!show && shown) screen.removePreference(mDuration);
     }
 
     @Override
@@ -42,6 +65,7 @@ public class PrefScreenFeedback extends PreferenceActivity
 
     public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
         (new BackupManager(this)).dataChanged();
+        if (KeyHaptics.PREF.equals(key)) showDuration(prefs);
     }
     
     @Override

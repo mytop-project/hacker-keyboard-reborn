@@ -289,6 +289,14 @@ public class Keyboard {
         public int y;
         /** The current pressed state of this key */
         public boolean pressed;
+        /**
+         * droidtop patch (mytop-project/tracker#903 H12a): the press motion's state, kept by KeyPressMotion while the key
+         * is drawn: when {@link #pressed} last changed as drawn, and the scale and pressed tint it had then.
+         */
+        long motionAt;
+        boolean motionPressed;
+        float motionScaleFrom = 1f;
+        float motionTintFrom;
         /** If this is a sticky key, is it on or locked? */
         public boolean on;
         public boolean locked;
@@ -926,6 +934,20 @@ public class Keyboard {
             key.x = xs[i];
             key.width = widths[i];
             key.gap = gaps[i];
+        }
+        // The floating mode's height (mytop-project/tracker#903 H12c): every row scaled alike, the total with them.
+        if (form.getHeightScale() != 1f) {
+            final int[] ys = new int[n];
+            final int[] heights = new int[n];
+            for (int i = 0; i < n; i++) {
+                ys[i] = mKeys.get(i).y;
+                heights[i] = mKeys.get(i).height;
+            }
+            mTotalHeight = KeyboardForm.scaleHeights(ys, heights, mTotalHeight, form.getHeightScale());
+            for (int i = 0; i < n; i++) {
+                mKeys.get(i).y = ys[i];
+                mKeys.get(i).height = heights[i];
+            }
         }
     }
 
